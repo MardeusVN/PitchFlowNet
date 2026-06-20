@@ -1,3 +1,4 @@
+import itertools
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
@@ -12,7 +13,12 @@ from .commons import slice_segments
 from .dataset import Batch, PiperDataset, UtteranceCollate
 from .losses import discriminator_loss, feature_loss, generator_loss, kl_loss
 from .mel_processing import mel_spectrogram_torch, spec_to_mel_torch
-from .models import MultiPeriodDiscriminator, SynthesizerTrn
+from .models import (
+    DurationDiscriminator,
+    MultiPeriodDiscriminator,
+    MultiResolutionDiscriminator,
+    SynthesizerTrn,
+)
 
 _LOGGER = logging.getLogger("vits.lightning")
 
@@ -106,6 +112,16 @@ class VitsModel(pl.LightningModule):
         )
         self.model_d = MultiPeriodDiscriminator(
             use_spectral_norm=self.hparams.use_spectral_norm
+        )
+        self.model_d_mrd = MultiResolutionDiscriminator(
+            use_spectral_norm=self.hparams.use_spectral_norm
+        )
+        self.model_d_dur = DurationDiscriminator(
+            in_channels=self.hparams.hidden_channels,
+            filter_channels=self.hparams.hidden_channels,
+            kernel_size=3,
+            p_dropout=self.hparams.p_dropout,
+            gin_channels=self.hparams.gin_channels,
         )
 
         # Dataset splits
@@ -208,11 +224,18 @@ class VitsModel(pl.LightningModule):
             l_length,
             _attn,
             ids_slice,
-            _x_mask,
+            x_mask,
             z_mask,
             (_z, z_p, m_p, logs_p, _m_q, logs_q),
+            (x_hidden, logw, logw_),
         ) = self.model_g(x, x_lengths, spec, spec_lengths, speaker_ids)
         self._y_hat = y_hat
+
+        # Save for training_step_d (duration discriminator)
+        self._dur_x = x_hidden
+        self._dur_mask = x_mask
+        self._dur_real = logw_
+        self._dur_fake = logw
 
         mel = spec_to_mel_torch(
             spec,
@@ -247,6 +270,12 @@ class VitsModel(pl.LightningModule):
         self._y = y
 
         _y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = self.model_d(y, y_hat)
+        _y_d_hat_r_mrd, y_d_hat_g_mrd, fmap_r_mrd, fmap_g_mrd = self.model_d_mrd(
+            y, y_hat
+        )
+        _dur_probs_r, dur_probs_hat = self.model_d_dur(
+            x_hidden, x_mask, logw_, logw
+        )
 
         with autocast(self.device.type, enabled=False):
             # Generator loss
@@ -254,11 +283,34 @@ class VitsModel(pl.LightningModule):
             loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.hparams.c_mel
             loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * self.hparams.c_kl
 
-            loss_fm = feature_loss(fmap_r, fmap_g)
+            loss_fm = feature_loss(fmap_r, fmap_g) + feature_loss(
+                fmap_r_mrd, fmap_g_mrd
+            )
             loss_gen, _losses_gen = generator_loss(y_d_hat_g)
-            loss_gen_all = loss_gen + loss_fm + loss_mel + loss_dur + loss_kl
+            loss_gen_mrd, _losses_gen_mrd = generator_loss(y_d_hat_g_mrd)
+            loss_dur_gen, _losses_dur_gen = generator_loss(dur_probs_hat)
+
+            loss_gen_all = (
+                loss_gen
+                + loss_gen_mrd
+                + loss_fm
+                + loss_mel
+                + loss_dur
+                + loss_kl
+                + loss_dur_gen
+            )
 
             self.log("loss_gen_all", loss_gen_all)
+            # Logged separately so progress is comparable against runs/architectures
+            # that don't have the same set of summed loss terms (e.g. original
+            # Piper without MRD/duration-discriminator/transformer-flow additions).
+            self.log("loss_mel", loss_mel)
+            self.log("loss_kl", loss_kl)
+            self.log("loss_dur", loss_dur)
+            self.log("loss_gen", loss_gen)
+            self.log("loss_gen_mrd", loss_gen_mrd)
+            self.log("loss_dur_gen", loss_dur_gen)
+            self.log("loss_fm", loss_fm)
 
             return loss_gen_all
 
@@ -267,15 +319,33 @@ class VitsModel(pl.LightningModule):
         y = self._y
         y_hat = self._y_hat
         y_d_hat_r, y_d_hat_g, _, _ = self.model_d(y, y_hat.detach())
+        y_d_hat_r_mrd, y_d_hat_g_mrd, _, _ = self.model_d_mrd(y, y_hat.detach())
+        dur_probs_r, dur_probs_hat = self.model_d_dur(
+            self._dur_x.detach(),
+            self._dur_mask,
+            self._dur_real.detach(),
+            self._dur_fake.detach(),
+        )
 
         with autocast(self.device.type, enabled=False):
             # Discriminator
             loss_disc, _losses_disc_r, _losses_disc_g = discriminator_loss(
                 y_d_hat_r, y_d_hat_g
             )
-            loss_disc_all = loss_disc
+            loss_disc_mrd, _losses_disc_r_mrd, _losses_disc_g_mrd = discriminator_loss(
+                y_d_hat_r_mrd, y_d_hat_g_mrd
+            )
+            loss_disc_dur, _losses_disc_r_dur, _losses_disc_g_dur = discriminator_loss(
+                dur_probs_r, dur_probs_hat
+            )
+            loss_disc_all = loss_disc + loss_disc_mrd + loss_disc_dur
 
             self.log("loss_disc_all", loss_disc_all)
+            # loss_disc alone is the term comparable against the original
+            # Piper's loss_disc_all (which had no MRD/duration discriminator).
+            self.log("loss_disc", loss_disc)
+            self.log("loss_disc_mrd", loss_disc_mrd)
+            self.log("loss_disc_dur", loss_disc_dur)
 
             return loss_disc_all
 
@@ -306,6 +376,11 @@ class VitsModel(pl.LightningModule):
         return val_loss
 
     def configure_optimizers(self):
+        discriminator_params = itertools.chain(
+            self.model_d.parameters(),
+            self.model_d_mrd.parameters(),
+            self.model_d_dur.parameters(),
+        )
         optimizers = [
             torch.optim.AdamW(
                 self.model_g.parameters(),
@@ -314,7 +389,7 @@ class VitsModel(pl.LightningModule):
                 eps=self.hparams.eps,
             ),
             torch.optim.AdamW(
-                self.model_d.parameters(),
+                discriminator_params,
                 lr=self.hparams.learning_rate,
                 betas=self.hparams.betas,
                 eps=self.hparams.eps,

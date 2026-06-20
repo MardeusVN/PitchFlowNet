@@ -209,6 +209,82 @@ class TextEncoder(nn.Module):
         return x, m, logs, x_mask
 
 
+class TransformerCouplingLayer(nn.Module):
+    """VITS2-style residual coupling layer: same affine-coupling math as
+    modules.ResidualCouplingLayer, but the conditioner network (which
+    predicts the affine params from x0) gets an extra self-attention pass
+    for global context, on top of the existing WaveNet-style conv stack (WN).
+
+    Invertibility is unaffected: x1 is still an invertible affine function
+    of x0 alone; making the *function that computes the affine params*
+    more expressive doesn't change that x0 passes through unchanged.
+    Verified empirically (forward->reverse reconstructs input exactly,
+    even after randomly perturbing weights).
+    """
+
+    def __init__(
+        self,
+        channels: int,
+        hidden_channels: int,
+        kernel_size: int,
+        dilation_rate: int,
+        n_layers: int,
+        n_heads: int = 2,
+        p_dropout: float = 0.0,
+        gin_channels: int = 0,
+        mean_only: bool = False,
+    ):
+        assert channels % 2 == 0, "channels should be divisible by 2"
+        super().__init__()
+        self.channels = channels
+        self.hidden_channels = hidden_channels
+        self.half_channels = channels // 2
+        self.mean_only = mean_only
+
+        self.pre = nn.Conv1d(self.half_channels, hidden_channels, 1)
+        self.enc = modules.WN(
+            hidden_channels,
+            kernel_size,
+            dilation_rate,
+            n_layers,
+            p_dropout=p_dropout,
+            gin_channels=gin_channels,
+        )
+        self.attn = attentions.Encoder(
+            hidden_channels,
+            hidden_channels * 2,
+            n_heads=n_heads,
+            n_layers=1,
+            kernel_size=1,
+            p_dropout=p_dropout,
+        )
+        self.post = nn.Conv1d(hidden_channels, self.half_channels * (2 - mean_only), 1)
+        self.post.weight.data.zero_()
+        self.post.bias.data.zero_()
+
+    def forward(self, x, x_mask, g=None, reverse=False):
+        x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
+        h = self.pre(x0) * x_mask
+        h = self.enc(h, x_mask, g=g)
+        h = h + self.attn(h, x_mask)
+        stats = self.post(h) * x_mask
+        if not self.mean_only:
+            m, logs = torch.split(stats, [self.half_channels] * 2, 1)
+        else:
+            m = stats
+            logs = torch.zeros_like(m)
+
+        if not reverse:
+            x1 = m + x1 * torch.exp(logs) * x_mask
+            x = torch.cat([x0, x1], 1)
+            logdet = torch.sum(logs, [1, 2])
+            return x, logdet
+        else:
+            x1 = (x1 - m) * torch.exp(-logs) * x_mask
+            x = torch.cat([x0, x1], 1)
+            return x
+
+
 class ResidualCouplingBlock(nn.Module):
     def __init__(
         self,
@@ -219,6 +295,8 @@ class ResidualCouplingBlock(nn.Module):
         n_layers: int,
         n_flows: int = 4,
         gin_channels: int = 0,
+        n_heads: int = 2,
+        use_transformer_flows: bool = True,
     ):
         super().__init__()
         self.channels = channels
@@ -228,20 +306,35 @@ class ResidualCouplingBlock(nn.Module):
         self.n_layers = n_layers
         self.n_flows = n_flows
         self.gin_channels = gin_channels
+        self.use_transformer_flows = use_transformer_flows
 
         self.flows = nn.ModuleList()
         for i in range(n_flows):
-            self.flows.append(
-                modules.ResidualCouplingLayer(
-                    channels,
-                    hidden_channels,
-                    kernel_size,
-                    dilation_rate,
-                    n_layers,
-                    gin_channels=gin_channels,
-                    mean_only=True,
+            if use_transformer_flows:
+                self.flows.append(
+                    TransformerCouplingLayer(
+                        channels,
+                        hidden_channels,
+                        kernel_size,
+                        dilation_rate,
+                        n_layers,
+                        n_heads=n_heads,
+                        gin_channels=gin_channels,
+                        mean_only=True,
+                    )
                 )
-            )
+            else:
+                self.flows.append(
+                    modules.ResidualCouplingLayer(
+                        channels,
+                        hidden_channels,
+                        kernel_size,
+                        dilation_rate,
+                        n_layers,
+                        gin_channels=gin_channels,
+                        mean_only=True,
+                    )
+                )
             self.flows.append(modules.Flip())
 
     def forward(self, x, x_mask, g=None, reverse=False):
@@ -318,7 +411,11 @@ class Generator(torch.nn.Module):
         resblock_module = modules.ResBlock1 if resblock == "1" else modules.ResBlock2
 
         self.ups = nn.ModuleList()
+        self.pre_up_snakes = nn.ModuleList()
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
+            self.pre_up_snakes.append(
+                modules.Snake1d(upsample_initial_channel // (2**i))
+            )
             self.ups.append(
                 weight_norm(
                     ConvTranspose1d(
@@ -339,6 +436,7 @@ class Generator(torch.nn.Module):
             ):
                 self.resblocks.append(resblock_module(ch, k, d))
 
+        self.final_snake = modules.Snake1d(ch)
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
         self.ups.apply(init_weights)
 
@@ -351,7 +449,7 @@ class Generator(torch.nn.Module):
             x = x + self.cond(g)
 
         for i, up in enumerate(self.ups):
-            x = F.leaky_relu(x, self.LRELU_SLOPE)
+            x = self.pre_up_snakes[i](x)
             x = up(x)
             xs = torch.zeros(1)
             for j, resblock in enumerate(self.resblocks):
@@ -361,7 +459,7 @@ class Generator(torch.nn.Module):
                 elif (index > 0) and (index < self.num_kernels):
                     xs += resblock(x)
             x = xs / self.num_kernels
-        x = F.leaky_relu(x)
+        x = self.final_snake(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
 
@@ -519,6 +617,175 @@ class MultiPeriodDiscriminator(torch.nn.Module):
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
 
+class DurationDiscriminator(nn.Module):
+    """VITS2-style time-step-wise duration discriminator.
+
+    Scores each phoneme's predicted duration as real/fake, conditioned on
+    the text-encoder hidden state at that position. Used only during
+    training (discarded for inference/export), so it adds zero cost to
+    the deployed model.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        filter_channels: int,
+        kernel_size: int,
+        p_dropout: float,
+        gin_channels: int = 0,
+    ):
+        super().__init__()
+        self.drop = nn.Dropout(p_dropout)
+        self.conv_1 = nn.Conv1d(
+            in_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.norm_1 = modules.LayerNorm(filter_channels)
+        self.conv_2 = nn.Conv1d(
+            filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.norm_2 = modules.LayerNorm(filter_channels)
+        self.dur_proj = nn.Conv1d(1, filter_channels, 1)
+
+        self.pre_out_conv_1 = nn.Conv1d(
+            2 * filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.pre_out_norm_1 = modules.LayerNorm(filter_channels)
+        self.pre_out_conv_2 = nn.Conv1d(
+            filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.pre_out_norm_2 = modules.LayerNorm(filter_channels)
+        self.output_layer = nn.Sequential(nn.Linear(filter_channels, 1), nn.Sigmoid())
+
+        if gin_channels != 0:
+            self.cond = nn.Conv1d(gin_channels, in_channels, 1)
+
+    def forward_probability(self, x, x_mask, dur):
+        dur = self.dur_proj(dur)
+        x = torch.cat([x, dur], dim=1)
+        x = self.pre_out_conv_1(x * x_mask)
+        x = torch.relu(x)
+        x = self.pre_out_norm_1(x)
+        x = self.drop(x)
+        x = self.pre_out_conv_2(x * x_mask)
+        x = torch.relu(x)
+        x = self.pre_out_norm_2(x)
+        x = self.drop(x)
+        x = x * x_mask
+        x = x.transpose(1, 2)
+        return self.output_layer(x)  # [B, T, 1]
+
+    def forward(self, x, x_mask, dur_r, dur_hat, g=None):
+        x = torch.detach(x)
+        if g is not None:
+            x = x + self.cond(torch.detach(g))
+        x = self.conv_1(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_1(x)
+        x = self.drop(x)
+        x = self.conv_2(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_2(x)
+        x = self.drop(x)
+
+        output_prob_r = self.forward_probability(x, x_mask, dur_r)
+        output_prob_hat = self.forward_probability(x, x_mask, dur_hat)
+        return [output_prob_r], [output_prob_hat]
+
+
+class DiscriminatorR(torch.nn.Module):
+    """Single-resolution STFT discriminator (UnivNet).
+
+    Operates on the STFT magnitude of the waveform at one (n_fft, hop_length,
+    win_length) resolution, treated as a 2D image (Conv2d).
+    """
+
+    def __init__(
+        self,
+        resolution: typing.Tuple[int, int, int],
+        use_spectral_norm: bool = False,
+    ):
+        super().__init__()
+        self.resolution = resolution
+        self.LRELU_SLOPE = 0.1
+        norm_f = weight_norm if not use_spectral_norm else spectral_norm
+        self.convs = nn.ModuleList(
+            [
+                norm_f(Conv2d(1, 32, (3, 9), padding=(1, 4))),
+                norm_f(Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
+                norm_f(Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
+                norm_f(Conv2d(32, 32, (3, 9), stride=(1, 2), padding=(1, 4))),
+                norm_f(Conv2d(32, 32, (3, 3), padding=(1, 1))),
+            ]
+        )
+        self.conv_post = norm_f(Conv2d(32, 1, (3, 3), padding=(1, 1)))
+
+    def spectrogram(self, x: torch.Tensor) -> torch.Tensor:
+        n_fft, hop_length, win_length = self.resolution
+        x = x.squeeze(1)
+        pad = (n_fft - hop_length) // 2
+        x = F.pad(x, (pad, pad), mode="reflect")
+        spec = torch.stft(
+            x,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            win_length=win_length,
+            center=False,
+            return_complex=True,
+        )
+        mag = torch.abs(spec)
+        return mag.unsqueeze(1)  # [B, 1, Freq, Frames]
+
+    def forward(self, x: torch.Tensor):
+        fmap = []
+        mag = self.spectrogram(x)
+        for l in self.convs:
+            mag = l(mag)
+            mag = F.leaky_relu(mag, self.LRELU_SLOPE)
+            fmap.append(mag)
+        mag = self.conv_post(mag)
+        fmap.append(mag)
+        mag = torch.flatten(mag, 1, -1)
+        return mag, fmap
+
+
+class MultiResolutionDiscriminator(torch.nn.Module):
+    """UnivNet-style multi-resolution spectrogram discriminator.
+
+    Same (y_d_rs, y_d_gs, fmap_rs, fmap_gs) interface as
+    MultiPeriodDiscriminator so it can reuse discriminator_loss/
+    generator_loss/feature_loss unchanged.
+    """
+
+    def __init__(
+        self,
+        resolutions: typing.Optional[
+            typing.List[typing.Tuple[int, int, int]]
+        ] = None,
+        use_spectral_norm: bool = False,
+    ):
+        super().__init__()
+        if resolutions is None:
+            resolutions = [(512, 50, 240), (1024, 120, 600), (2048, 240, 1200)]
+        self.discriminators = nn.ModuleList(
+            [DiscriminatorR(r, use_spectral_norm) for r in resolutions]
+        )
+
+    def forward(self, y: torch.Tensor, y_hat: torch.Tensor):
+        y_d_rs = []
+        y_d_gs = []
+        fmap_rs = []
+        fmap_gs = []
+        for d in self.discriminators:
+            y_d_r, fmap_r = d(y)
+            y_d_g, fmap_g = d(y_hat)
+            y_d_rs.append(y_d_r)
+            y_d_gs.append(y_d_g)
+            fmap_rs.append(fmap_r)
+            fmap_gs.append(fmap_g)
+
+        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+
+
 class SynthesizerTrn(nn.Module):
     """
     Synthesizer for Training
@@ -650,11 +917,15 @@ class SynthesizerTrn(nn.Module):
             )
 
         w = attn.sum(2)
+        logw_ = torch.log(w + 1e-6) * x_mask
         if self.use_sdp:
             l_length = self.dp(x, x_mask, w, g=g)
             l_length = l_length / torch.sum(x_mask)
+            # Sample a predicted duration (reverse mode) purely to feed the
+            # duration discriminator -- same call infer() uses, does not
+            # affect l_length (the SDP's own NLL loss).
+            logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=1.0)
         else:
-            logw_ = torch.log(w + 1e-6) * x_mask
             logw = self.dp(x, x_mask, g=g)
             l_length = torch.sum((logw - logw_) ** 2, [1, 2]) / torch.sum(
                 x_mask
@@ -676,6 +947,7 @@ class SynthesizerTrn(nn.Module):
             x_mask,
             y_mask,
             (z, z_p, m_p, logs_p, m_q, logs_q),
+            (x, logw, logw_),
         )
 
     def infer(
