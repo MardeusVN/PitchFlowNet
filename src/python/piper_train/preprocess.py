@@ -14,6 +14,7 @@ from multiprocessing import JoinableQueue, Process, Queue
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+import torch
 from piper_phonemize import (
     phonemize_espeak,
     phonemize_codepoints,
@@ -25,7 +26,7 @@ from piper_phonemize import (
     tashkeel_run,
 )
 
-from .norm_audio import cache_norm_audio, make_silence_detector
+from .norm_audio import cache_f0, cache_norm_audio, make_silence_detector
 
 _DIR = Path(__file__).parent
 _VERSION = (_DIR / "VERSION").read_text(encoding="utf-8").strip()
@@ -318,6 +319,13 @@ def phonemize_batch_espeak(
                             silence_detector,
                             args.sample_rate,
                         )
+                        num_mel_frames = torch.load(utt.audio_spec_path).shape[-1]
+                        utt.audio_f0_path = cache_f0(
+                            utt.audio_norm_path,
+                            args.cache_dir,
+                            args.sample_rate,
+                            num_mel_frames,
+                        )
                     queue_out.put(utt)
                 except TimeoutError:
                     _LOGGER.error("Skipping utterance due to timeout: %s", utt)
@@ -367,6 +375,13 @@ def phonemize_batch_text(
                             silence_detector,
                             args.sample_rate,
                         )
+                        num_mel_frames = torch.load(utt.audio_spec_path).shape[-1]
+                        utt.audio_f0_path = cache_f0(
+                            utt.audio_norm_path,
+                            args.cache_dir,
+                            args.sample_rate,
+                            num_mel_frames,
+                        )
                     queue_out.put(utt)
                 except TimeoutError:
                     _LOGGER.error("Skipping utterance due to timeout: %s", utt)
@@ -392,6 +407,7 @@ class Utterance:
     phoneme_ids: Optional[List[int]] = None
     audio_norm_path: Optional[Path] = None
     audio_spec_path: Optional[Path] = None
+    audio_f0_path: Optional[Path] = None
     missing_phonemes: "Counter[str]" = field(default_factory=Counter)
 
 
