@@ -44,7 +44,7 @@ def main():
     _LOGGER.info("Text: %s", args.text)
     _LOGGER.info("Phoneme ids (%d): %s", len(phoneme_ids), phoneme_ids)
 
-    model = VitsModel.load_from_checkpoint(args.checkpoint, dataset=None)
+    model = VitsModel.load_from_checkpoint(args.checkpoint, dataset=None, strict=False)
     model.eval()
     with torch.no_grad():
         model.model_g.dec.remove_weight_norm()

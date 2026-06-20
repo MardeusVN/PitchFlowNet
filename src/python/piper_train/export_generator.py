@@ -34,7 +34,7 @@ def main():
     args.output = Path(args.output)
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    model = VitsModel.load_from_checkpoint(args.checkpoint, dataset=None)
+    model = VitsModel.load_from_checkpoint(args.checkpoint, dataset=None, strict=False)
     model_g = model.model_g
 
     # Inference only

@@ -16,6 +16,7 @@ class Utterance:
     phoneme_ids: List[int]
     audio_norm_path: Path
     audio_spec_path: Path
+    audio_f0_path: Path
     speaker_id: Optional[int] = None
     text: Optional[str] = None
 
@@ -25,6 +26,7 @@ class UtteranceTensors:
     phoneme_ids: LongTensor
     spectrogram: FloatTensor
     audio_norm: FloatTensor
+    f0: FloatTensor
     speaker_id: Optional[LongTensor] = None
     text: Optional[str] = None
 
@@ -41,6 +43,7 @@ class Batch:
     spectrogram_lengths: LongTensor
     audios: FloatTensor
     audio_lengths: LongTensor
+    f0s: FloatTensor
     speaker_ids: Optional[LongTensor] = None
 
 
@@ -79,6 +82,7 @@ class PiperDataset(Dataset):
             phoneme_ids=LongTensor(utt.phoneme_ids),
             audio_norm=torch.load(utt.audio_norm_path),
             spectrogram=torch.load(utt.audio_spec_path),
+            f0=torch.load(utt.audio_f0_path),
             speaker_id=LongTensor([utt.speaker_id])
             if utt.speaker_id is not None
             else None,
@@ -124,6 +128,7 @@ class PiperDataset(Dataset):
             phoneme_ids=utt_dict["phoneme_ids"],
             audio_norm_path=Path(utt_dict["audio_norm_path"]),
             audio_spec_path=Path(utt_dict["audio_spec_path"]),
+            audio_f0_path=Path(utt_dict["audio_f0_path"]),
             speaker_id=utt_dict.get("speaker_id"),
             text=utt_dict.get("text"),
         )
@@ -168,10 +173,12 @@ class UtteranceCollate:
         phonemes_padded = LongTensor(num_utterances, max_phonemes_length)
         spec_padded = FloatTensor(num_utterances, num_mels, max_spec_length)
         audio_padded = FloatTensor(num_utterances, 1, max_audio_length)
+        f0_padded = FloatTensor(num_utterances, max_spec_length)
 
         phonemes_padded.zero_()
         spec_padded.zero_()
         audio_padded.zero_()
+        f0_padded.zero_()
 
         phoneme_lengths = LongTensor(num_utterances)
         spec_lengths = LongTensor(num_utterances)
@@ -199,6 +206,8 @@ class UtteranceCollate:
             audio_padded[utt_idx, :, :audio_length] = utt.audio_norm
             audio_lengths[utt_idx] = audio_length
 
+            f0_padded[utt_idx, :spec_length] = utt.f0[:spec_length]
+
             if utt.speaker_id is not None:
                 assert speaker_ids is not None
                 speaker_ids[utt_idx] = utt.speaker_id
@@ -210,5 +219,6 @@ class UtteranceCollate:
             spectrogram_lengths=spec_lengths,
             audios=audio_padded,
             audio_lengths=audio_lengths,
+            f0s=f0_padded,
             speaker_ids=speaker_ids,
         )

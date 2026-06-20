@@ -210,13 +210,14 @@ class VitsModel(pl.LightningModule):
             return self.training_step_d(batch)
 
     def training_step_g(self, batch: Batch):
-        x, x_lengths, y, _, spec, spec_lengths, speaker_ids = (
+        x, x_lengths, y, _, spec, spec_lengths, f0, speaker_ids = (
             batch.phoneme_ids,
             batch.phoneme_lengths,
             batch.audios,
             batch.audio_lengths,
             batch.spectrograms,
             batch.spectrogram_lengths,
+            batch.f0s,
             batch.speaker_ids if batch.speaker_ids is not None else None,
         )
         (
@@ -227,8 +228,8 @@ class VitsModel(pl.LightningModule):
             x_mask,
             z_mask,
             (_z, z_p, m_p, logs_p, _m_q, logs_q),
-            (x_hidden, logw, logw_),
-        ) = self.model_g(x, x_lengths, spec, spec_lengths, speaker_ids)
+            (x_hidden, logw, logw_, l_f0),
+        ) = self.model_g(x, x_lengths, spec, spec_lengths, speaker_ids, f0=f0)
         self._y_hat = y_hat
 
         # Save for training_step_d (duration discriminator)
@@ -298,12 +299,14 @@ class VitsModel(pl.LightningModule):
                 + loss_dur
                 + loss_kl
                 + loss_dur_gen
+                + l_f0
             )
 
             self.log("loss_gen_all", loss_gen_all)
             # Logged separately so progress is comparable against runs/architectures
             # that don't have the same set of summed loss terms (e.g. original
-            # Piper without MRD/duration-discriminator/transformer-flow additions).
+            # Piper without MRD/duration-discriminator/transformer-flow/F0
+            # predictor additions).
             self.log("loss_mel", loss_mel)
             self.log("loss_kl", loss_kl)
             self.log("loss_dur", loss_dur)
@@ -311,6 +314,7 @@ class VitsModel(pl.LightningModule):
             self.log("loss_gen_mrd", loss_gen_mrd)
             self.log("loss_dur_gen", loss_dur_gen)
             self.log("loss_fm", loss_fm)
+            self.log("loss_f0", l_f0)
 
             return loss_gen_all
 

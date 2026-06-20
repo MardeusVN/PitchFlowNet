@@ -165,6 +165,45 @@ class DurationPredictor(nn.Module):
         return x * x_mask
 
 
+class F0Predictor(nn.Module):
+    """Predicts a per-phoneme log-F0 value from the text encoder's hidden
+    state -- same input/architecture shape as DurationPredictor. Validated
+    standalone (frozen backbone, MSE vs. per-phoneme-averaged ground-truth
+    F0) before being wired into the generator."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        filter_channels: int,
+        kernel_size: int,
+        p_dropout: float,
+    ):
+        super().__init__()
+        self.drop = nn.Dropout(p_dropout)
+        self.conv_1 = nn.Conv1d(
+            in_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.norm_1 = modules.LayerNorm(filter_channels)
+        self.conv_2 = nn.Conv1d(
+            filter_channels, filter_channels, kernel_size, padding=kernel_size // 2
+        )
+        self.norm_2 = modules.LayerNorm(filter_channels)
+        self.proj = nn.Conv1d(filter_channels, 1, 1)
+
+    def forward(self, x, x_mask):
+        x = torch.detach(x)
+        x = self.conv_1(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_1(x)
+        x = self.drop(x)
+        x = self.conv_2(x * x_mask)
+        x = torch.relu(x)
+        x = self.norm_2(x)
+        x = self.drop(x)
+        x = self.proj(x * x_mask)
+        return x * x_mask  # log-F0 per phoneme, [B, 1, T_text]
+
+
 class TextEncoder(nn.Module):
     def __init__(
         self,
@@ -443,10 +482,19 @@ class Generator(torch.nn.Module):
         if gin_channels != 0:
             self.cond = nn.Conv1d(gin_channels, upsample_initial_channel, 1)
 
-    def forward(self, x, g=None):
+        # Zero-initialized so this starts as a true no-op when grafted onto an
+        # already-trained checkpoint (avoids injecting random noise into the
+        # decoder's input before f0_cond has learned anything useful).
+        self.f0_cond = nn.Conv1d(1, upsample_initial_channel, 1)
+        self.f0_cond.weight.data.zero_()
+        self.f0_cond.bias.data.zero_()
+
+    def forward(self, x, g=None, f0=None):
         x = self.conv_pre(x)
         if g is not None:
             x = x + self.cond(g)
+        if f0 is not None:
+            x = x + self.f0_cond(f0)
 
         for i, up in enumerate(self.ups):
             x = self.pre_up_snakes[i](x)
@@ -878,10 +926,12 @@ class SynthesizerTrn(nn.Module):
                 hidden_channels, 256, 3, 0.5, gin_channels=gin_channels
             )
 
+        self.f0_predictor = F0Predictor(hidden_channels, 256, 3, 0.5)
+
         if n_speakers > 1:
             self.emb_g = nn.Embedding(n_speakers, gin_channels)
 
-    def forward(self, x, x_lengths, y, y_lengths, sid=None):
+    def forward(self, x, x_lengths, y, y_lengths, sid=None, f0=None):
 
         x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
         if self.n_speakers > 1:
@@ -918,6 +968,17 @@ class SynthesizerTrn(nn.Module):
 
         w = attn.sum(2)
         logw_ = torch.log(w + 1e-6) * x_mask
+
+        # F0 predictor: regress a per-phoneme log-F0 target derived by
+        # averaging the frame-rate ground-truth F0 over each phoneme's
+        # MAS-aligned frames (same per-phoneme resolution as duration).
+        attn_sq = attn.squeeze(1)  # [b, t_t, t_s]
+        f0_frame = f0[:, : attn_sq.shape[1]].unsqueeze(1)  # [b, 1, t_t]
+        phone_f0_sum = torch.matmul(f0_frame, attn_sq)  # [b, 1, t_s]
+        phone_f0 = phone_f0_sum / torch.clamp_min(w, 1.0)  # w: [b, 1, t_s]
+        log_f0_target = torch.log(torch.clamp_min(phone_f0, 1.0)) * x_mask
+        log_f0_pred = self.f0_predictor(x, x_mask)
+        l_f0 = torch.sum((log_f0_pred - log_f0_target) ** 2 * x_mask) / torch.sum(x_mask)
         if self.use_sdp:
             l_length = self.dp(x, x_mask, w, g=g)
             l_length = l_length / torch.sum(x_mask)
@@ -938,7 +999,13 @@ class SynthesizerTrn(nn.Module):
         z_slice, ids_slice = commons.rand_slice_segments(
             z, y_lengths, self.segment_size
         )
-        o = self.dec(z_slice, g=g)
+        # Condition the decoder with the real (teacher-forced) frame-rate F0,
+        # sliced the same way as z -- mirrors how z itself comes from the
+        # ground-truth posterior path during training, not the predicted prior.
+        f0_slice = commons.slice_segments(
+            f0[:, : z.shape[2]].unsqueeze(1), ids_slice, self.segment_size
+        )
+        o = self.dec(z_slice, g=g, f0=f0_slice)
         return (
             o,
             l_length,
@@ -947,7 +1014,7 @@ class SynthesizerTrn(nn.Module):
             x_mask,
             y_mask,
             (z, z_p, m_p, logs_p, m_q, logs_q),
-            (x, logw, logw_),
+            (x, logw, logw_, l_f0),
         )
 
     def infer(
@@ -987,9 +1054,20 @@ class SynthesizerTrn(nn.Module):
             1, 2
         )  # [b, t', t], [b, t, d] -> [b, d, t']
 
+        # No ground-truth F0 at inference -- expand the *predicted*
+        # per-phoneme F0 to frame-rate using the same predicted alignment
+        # used to expand m_p/logs_p above.
+        log_f0_pred = self.f0_predictor(x, x_mask)
+        f0_frame = torch.matmul(
+            attn.squeeze(1), log_f0_pred.transpose(1, 2)
+        ).transpose(1, 2)  # [b, 1, t']
+        f0_frame = torch.exp(f0_frame)
+
         z_p = m_p + torch.randn_like(m_p) * torch.exp(logs_p) * noise_scale
         z = self.flow(z_p, y_mask, g=g, reverse=True)
-        o = self.dec((z * y_mask)[:, :, :max_len], g=g)
+        o = self.dec(
+            (z * y_mask)[:, :, :max_len], g=g, f0=f0_frame[:, :, :max_len]
+        )
 
         return o, attn, y_mask, (z, z_p, m_p, logs_p)
 
