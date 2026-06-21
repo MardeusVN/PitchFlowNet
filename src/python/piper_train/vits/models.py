@@ -772,15 +772,18 @@ class DiscriminatorR(torch.nn.Module):
         x = x.squeeze(1)
         pad = (n_fft - hop_length) // 2
         x = F.pad(x, (pad, pad), mode="reflect")
-        spec = torch.stft(
-            x,
-            n_fft=n_fft,
-            hop_length=hop_length,
-            win_length=win_length,
-            center=False,
-            return_complex=True,
-        )
-        mag = torch.abs(spec)
+        # cuFFT doesn't support half/bf16 input, so this must stay fp32
+        # even when the rest of the discriminator runs under autocast.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            spec = torch.stft(
+                x.float(),
+                n_fft=n_fft,
+                hop_length=hop_length,
+                win_length=win_length,
+                center=False,
+                return_complex=True,
+            )
+            mag = torch.abs(spec)
         return mag.unsqueeze(1)  # [B, 1, Freq, Frames]
 
     def forward(self, x: torch.Tensor):

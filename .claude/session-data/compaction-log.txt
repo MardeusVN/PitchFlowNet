@@ -5,3 +5,6 @@
 [2026-05-31 20:30:07] Context compaction triggered
 [2026-05-31 20:57:32] Context compaction triggered
 [2026-06-01 12:21:09] Context compaction triggered
+[2026-06-20 22:46:55] Context compaction triggered
+[2026-06-20 23:31:33] Context compaction triggered
+[2026-06-21 02:11:07] Context compaction triggered

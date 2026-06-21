@@ -1,15 +1,22 @@
 import argparse
 import json
 import logging
+import pathlib
 from pathlib import Path
 
 import torch
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from .vits.lightning import VitsModel
 
 _LOGGER = logging.getLogger(__package__)
+
+# PyTorch >=2.6 defaults torch.load to weights_only=True, which rejects the
+# pathlib.PosixPath the dataset path hparam gets pickled as inside our own
+# checkpoints. Safe to allowlist since we only ever load checkpoints we wrote.
+torch.serialization.add_safe_globals([pathlib.PosixPath])
 
 
 def main():
@@ -34,7 +41,32 @@ def main():
         "--resume_from_single_speaker_checkpoint",
         help="For multi-speaker models only. Converts a single-speaker checkpoint to multi-speaker and resumes training",
     )
-    Trainer.add_argparse_args(parser)
+    parser.add_argument(
+        "--resume_from_checkpoint", help="Path to a .ckpt file to resume training from"
+    )
+    parser.add_argument("--default_root_dir", help="Trainer log/checkpoint directory")
+    # `Trainer.add_argparse_args` was removed in PyTorch Lightning 2.0, so the
+    # subset of Trainer flags actually used by this project's README/scripts
+    # is re-declared explicitly here. Defaults are tuned for a 2x RTX 4070 Ti
+    # (12 GB each) + 20-core CPU workstation.
+    parser.add_argument("--accelerator", default="gpu")
+    parser.add_argument(
+        "--devices",
+        default="2",
+        help="Number of GPUs, or comma-separated GPU ids. >1 requires NCCL "
+        "(run from WSL2/Linux on Windows hosts -- see TRAINING.md)",
+    )
+    parser.add_argument(
+        "--strategy",
+        default="ddp_find_unused_parameters_true",
+        help="Set to 'auto' for single-device training",
+    )
+    parser.add_argument(
+        "--precision",
+        default="bf16-mixed",
+        help="Ada Lovelace (40-series) has native bf16 tensor cores; no GradScaler needed",
+    )
+    parser.add_argument("--max_epochs", type=int, default=10000)
     VitsModel.add_model_specific_args(parser)
     parser.add_argument("--seed", type=int, default=1234)
     args = parser.parse_args()
@@ -44,6 +76,9 @@ def main():
     if not args.default_root_dir:
         args.default_root_dir = args.dataset_dir
 
+    # TF32 matmul on Ampere+/Ada tensor cores; safe precision/throughput
+    # tradeoff for conv/attention-heavy training.
+    torch.set_float32_matmul_precision("high")
     torch.backends.cudnn.benchmark = True
     torch.manual_seed(args.seed)
 
@@ -57,12 +92,35 @@ def main():
         num_speakers = int(config["num_speakers"])
         sample_rate = int(config["audio"]["sample_rate"])
 
-    trainer = Trainer.from_argparse_args(args)
+    devices = int(args.devices) if str(args.devices).isdigit() else args.devices
+    callbacks = []
     if args.checkpoint_epochs is not None:
-        trainer.callbacks = [ModelCheckpoint(every_n_epochs=args.checkpoint_epochs)]
+        callbacks.append(
+            ModelCheckpoint(
+                every_n_epochs=args.checkpoint_epochs,
+                # GAN losses aren't monotonic with audio quality even within
+                # one run, so don't auto-prune by val_loss -- keep every
+                # checkpoint and pick the best by ear in TensorBoard.
+                save_top_k=-1,
+                save_last=True,
+            )
+        )
         _LOGGER.debug(
             "Checkpoints will be saved every %s epoch(s)", args.checkpoint_epochs
         )
+
+    trainer = Trainer(
+        accelerator=args.accelerator,
+        devices=devices,
+        strategy=args.strategy if devices != 1 else "auto",
+        precision=args.precision,
+        max_epochs=args.max_epochs,
+        default_root_dir=args.default_root_dir,
+        # validation_step logs audio via logger.experiment.add_audio, which
+        # only TensorBoardLogger's SummaryWriter exposes (CSVLogger doesn't).
+        logger=TensorBoardLogger(save_dir=args.default_root_dir),
+        callbacks=callbacks,
+    )
 
     dict_args = vars(args)
     if args.quality == "x-low":
@@ -121,7 +179,7 @@ def main():
             "Successfully converted single-speaker checkpoint to multi-speaker"
         )
 
-    trainer.fit(model)
+    trainer.fit(model, ckpt_path=args.resume_from_checkpoint)
 
 
 def load_state_dict(model, saved_state_dict):

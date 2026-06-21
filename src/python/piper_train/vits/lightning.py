@@ -83,6 +83,11 @@ class VitsModel(pl.LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+        # GAN training needs two independent backward/step calls per batch
+        # (generator, then discriminator) -- not expressible via PL's
+        # automatic single-optimizer-per-call dispatch since PL 2.0 dropped
+        # the old `optimizer_idx` argument.
+        self.automatic_optimization = False
 
         if (self.hparams.num_speakers > 1) and (self.hparams.gin_channels <= 0):
             # Default gin_channels for multi-speaker model
@@ -178,6 +183,8 @@ class VitsModel(pl.LightningModule):
             ),
             num_workers=self.hparams.num_workers,
             batch_size=self.hparams.batch_size,
+            pin_memory=True,
+            persistent_workers=self.hparams.num_workers > 0,
         )
 
     def val_dataloader(self):
@@ -189,6 +196,8 @@ class VitsModel(pl.LightningModule):
             ),
             num_workers=self.hparams.num_workers,
             batch_size=self.hparams.batch_size,
+            pin_memory=True,
+            persistent_workers=self.hparams.num_workers > 0,
         )
 
     def test_dataloader(self):
@@ -200,14 +209,30 @@ class VitsModel(pl.LightningModule):
             ),
             num_workers=self.hparams.num_workers,
             batch_size=self.hparams.batch_size,
+            pin_memory=True,
+            persistent_workers=self.hparams.num_workers > 0,
         )
 
-    def training_step(self, batch: Batch, batch_idx: int, optimizer_idx: int):
-        if optimizer_idx == 0:
-            return self.training_step_g(batch)
+    def training_step(self, batch: Batch, batch_idx: int):
+        opt_g, opt_d = self.optimizers()
 
-        if optimizer_idx == 1:
-            return self.training_step_d(batch)
+        loss_gen_all = self.training_step_g(batch)
+        opt_g.zero_grad()
+        self.manual_backward(loss_gen_all)
+        opt_g.step()
+
+        loss_disc_all = self.training_step_d(batch)
+        opt_d.zero_grad()
+        self.manual_backward(loss_disc_all)
+        opt_d.step()
+
+    def on_train_epoch_end(self):
+        # Automatic LR scheduler stepping is disabled along with automatic
+        # optimization, so step both schedulers once per epoch here (same
+        # cadence as the original PL 1.7 default for ExponentialLR).
+        sched_g, sched_d = self.lr_schedulers()
+        sched_g.step()
+        sched_d.step()
 
     def training_step_g(self, batch: Batch):
         x, x_lengths, y, _, spec, spec_lengths, f0, speaker_ids = (
@@ -238,29 +263,33 @@ class VitsModel(pl.LightningModule):
         self._dur_real = logw_
         self._dur_fake = logw
 
-        mel = spec_to_mel_torch(
-            spec,
-            self.hparams.filter_length,
-            self.hparams.mel_channels,
-            self.hparams.sample_rate,
-            self.hparams.mel_fmin,
-            self.hparams.mel_fmax,
-        )
-        y_mel = slice_segments(
-            mel,
-            ids_slice,
-            self.hparams.segment_size // self.hparams.hop_length,
-        )
-        y_hat_mel = mel_spectrogram_torch(
-            y_hat.squeeze(1),
-            self.hparams.filter_length,
-            self.hparams.mel_channels,
-            self.hparams.sample_rate,
-            self.hparams.hop_length,
-            self.hparams.win_length,
-            self.hparams.mel_fmin,
-            self.hparams.mel_fmax,
-        )
+        # cuFFT (torch.stft, used inside the mel functions) doesn't accept
+        # half/bf16 input, so this has to run outside the autocast region
+        # under mixed-precision training -- not just the loss sums below.
+        with autocast(self.device.type, enabled=False):
+            mel = spec_to_mel_torch(
+                spec.float(),
+                self.hparams.filter_length,
+                self.hparams.mel_channels,
+                self.hparams.sample_rate,
+                self.hparams.mel_fmin,
+                self.hparams.mel_fmax,
+            )
+            y_mel = slice_segments(
+                mel,
+                ids_slice,
+                self.hparams.segment_size // self.hparams.hop_length,
+            )
+            y_hat_mel = mel_spectrogram_torch(
+                y_hat.float().squeeze(1),
+                self.hparams.filter_length,
+                self.hparams.mel_channels,
+                self.hparams.sample_rate,
+                self.hparams.hop_length,
+                self.hparams.win_length,
+                self.hparams.mel_fmin,
+                self.hparams.mel_fmax,
+            )
         y = slice_segments(
             y,
             ids_slice * self.hparams.hop_length,
@@ -413,12 +442,22 @@ class VitsModel(pl.LightningModule):
     @staticmethod
     def add_model_specific_args(parent_parser):
         parser = parent_parser.add_argument_group("VitsModel")
-        parser.add_argument("--batch-size", type=int, required=True)
+        # Default tuned for a 12 GB GPU (RTX 4070 Ti) with segment_size=8192
+        # and the added MRD/duration-discriminator VRAM overhead -- raise if
+        # memory headroom allows, lower on OOM.
+        parser.add_argument("--batch-size", type=int, default=8)
+        parser.add_argument(
+            "--num-workers",
+            type=int,
+            default=8,
+            help="DataLoader workers per GPU process (default tuned for a 20-core/28-thread CPU)",
+        )
         parser.add_argument("--validation-split", type=float, default=0.1)
         parser.add_argument("--num-test-examples", type=int, default=5)
         parser.add_argument(
             "--max-phoneme-ids",
             type=int,
+            default=400,
             help="Exclude utterances with phoneme id lists longer than this",
         )
         #
