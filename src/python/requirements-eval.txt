@@ -1,0 +1,6 @@
+# Extra dependencies for piper_train.eval_harness (WER + UTMOS scoring).
+# Kept separate from requirements.txt so installing them cannot perturb the
+# training environment/dependency graph.
+openai-whisper
+jiwer
+git+https://github.com/sarulab-speech/UTMOSv2.git
