@@ -122,7 +122,9 @@ Note: `spectrogram` channel count here is the raw STFT magnitude bin count (`n_f
 
 ## 2. Model Architecture (`vits/models.py`)
 
-The model is `SynthesizerTrn`, a Conditional-VAE + Normalizing-Flow + GAN decoder, with three Piper-Modern additions over stock VITS/Piper: **(a)** Snake1d + Multi-Resolution STFT Discriminator in the generator/discriminator, **(b)** a Transformer-augmented coupling layer + Duration Discriminator in the flow, **(c)** an explicit F0 Predictor feeding the decoder.
+The model is `SynthesizerTrn`, a Conditional-VAE + Normalizing-Flow + GAN decoder, with three Piper-Modern additions over stock VITS/Piper: **(a)** Snake1d (BigVGAN-style) + Multi-Resolution STFT Discriminator (UnivNet-style) in the generator/discriminator, **(b)** a Transformer-augmented coupling layer + Duration Discriminator (both VITS2-style) in the flow, **(c)** an explicit F0 Predictor (FastPitch-style per-phoneme pitch conditioning) feeding the decoder.
+
+None of these four mechanisms is individually novel — each has direct prior art (BigVGAN, UnivNet, VITS2, FastPitch). The contribution is **integration-level**: combining a BigVGAN-style generator/discriminator, a VITS2-style flow + duration discriminator, and FastPitch-style per-phoneme pitch conditioning inside one single-speaker, low-resource VITS pipeline — to our knowledge not previously published as one combined system. See `docs/Paper/related-work-spec_sec2.md` for the literature positioning behind this claim.
 
 ```mermaid
 flowchart TB
@@ -175,7 +177,7 @@ z = (m_q + randn_like(m_q) * exp(logs_q)) * mask     # reparameterization trick
 ```
 Only used during training (the posterior needs the ground-truth spectrogram, unavailable at inference).
 
-### 2.3 Normalizing Flow (`ResidualCouplingBlock` + `TransformerCouplingLayer`, new)
+### 2.3 Normalizing Flow (`ResidualCouplingBlock` + `TransformerCouplingLayer`, VITS2-style)
 
 4 flow blocks, each = `[TransformerCouplingLayer, Flip]`, alternating which half of the 192 channels is transformed:
 
@@ -213,9 +215,9 @@ Each `ConvFlow` is a piecewise-rational-quadratic-spline coupling transform (10 
 
 At inference (`reverse=True`): sample `z ~ N(0, noise_scale_w)`, run the 4 `ConvFlow`/`Flip` pairs backward, take `logw = z0` as the predicted log-duration per phoneme.
 
-### 2.5 F0 Predictor (new, `models.py:168-204`)
+### 2.5 F0 Predictor (FastPitch-style per-phoneme pitch conditioning, `models.py:168-204`)
 
-Architecturally identical to the (non-stochastic) `DurationPredictor` — same 2-conv + LayerNorm + ReLU + dropout stack — but regresses a scalar **log-F0** per phoneme instead of log-duration:
+Architecturally identical to the (non-stochastic) `DurationPredictor` — same 2-conv + LayerNorm + ReLU + dropout stack — but regresses a scalar **log-F0** per phoneme instead of log-duration. This per-phoneme-average-pitch-from-encoder-hidden-state mechanism mirrors FastPitch (Łańcucki, 2020); what's new here is feeding it into a VITS2-style flow-based decoder rather than FastPitch's non-autoregressive FFTr decoder — see `docs/Paper/related-work-spec_sec2.md`.
 ```
 F0Predictor(in=192, filter=256, kernel=3, p_dropout=0.5):
     x = detach(x_hidden)
@@ -234,7 +236,7 @@ l_f0 = sum((log_f0_pred - log_f0_target)^2 * x_mask) / sum(x_mask)   # masked MS
 ```
 At inference time there is no ground truth, so the *predicted* per-phoneme log-F0 is expanded to frame rate using the same predicted alignment used for `m_p`/`logs_p` (`models.py:1063-1067`), then exponentiated and fed to the decoder.
 
-### 2.6 Generator / Decoder (new Snake1d + F0/speaker conditioning, `models.py:431-522`)
+### 2.6 Generator / Decoder (BigVGAN-style Snake1d + F0/speaker conditioning, `models.py:431-522`)
 
 ```
 conv_pre: Conv1d(192, 256, kernel=7, padding=3)

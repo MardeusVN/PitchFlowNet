@@ -93,15 +93,27 @@ def main():
         sample_rate = int(config["audio"]["sample_rate"])
 
     devices = int(args.devices) if str(args.devices).isdigit() else args.devices
-    callbacks = []
+    # Best-checkpoint is always active (independent of --checkpoint-epochs).
+    callbacks = [
+        ModelCheckpoint(
+            filename="best-{epoch}-{val_loss_mel:.4f}",
+            monitor="val_loss_mel",
+            mode="min",
+            save_top_k=1,
+            save_last=False,
+        )
+    ]
     if args.checkpoint_epochs is not None:
         callbacks.append(
             ModelCheckpoint(
                 every_n_epochs=args.checkpoint_epochs,
-                # GAN losses aren't monotonic with audio quality even within
-                # one run, so don't auto-prune by val_loss -- keep every
-                # checkpoint and pick the best by ear in TensorBoard.
-                save_top_k=-1,
+                # Disk space is the constraint now, not pick-the-best-by-ear:
+                # only keep one rolling checkpoint instead of every epoch.
+                # NOTE: save_top_k=0 disables saving entirely, which silently
+                # starves save_last too (it only copies an existing save) --
+                # use save_top_k=1 with no monitor so a real checkpoint is
+                # written and overwritten every epoch.
+                save_top_k=1,
                 save_last=True,
             )
         )

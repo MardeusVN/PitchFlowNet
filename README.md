@@ -7,6 +7,7 @@ Built on top of [Piper](https://github.com/rhasspy/piper) (MIT License, Copyrigh
 - MultiResolutionDiscriminator (UnivNet-style)
 - Transformer-in-Flow coupling layers (VITS2-style)
 - DurationDiscriminator (VITS2-style)
+- F0Predictor (FastPitch-style per-phoneme pitch conditioning, integrated into the VITS2-style flow decoder)
 
 See `src/python/piper_train/vits/` for the modified model code and `src/python/piper_train/say.py` for a custom-sentence inference script.
 

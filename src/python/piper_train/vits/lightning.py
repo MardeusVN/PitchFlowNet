@@ -61,6 +61,11 @@ class VitsModel(pl.LightningModule):
         use_spectral_norm: bool = False,
         gin_channels: int = 0,
         use_sdp: bool = True,
+        use_snake: bool = True,
+        use_mrd: bool = True,
+        use_dur_disc: bool = True,
+        use_transformer_flows: bool = True,
+        use_f0: bool = True,
         segment_size: int = 8192,
         # training
         dataset: Optional[List[Union[str, Path]]] = None,
@@ -114,19 +119,28 @@ class VitsModel(pl.LightningModule):
             n_speakers=self.hparams.num_speakers,
             gin_channels=self.hparams.gin_channels,
             use_sdp=self.hparams.use_sdp,
+            use_snake=self.hparams.use_snake,
+            use_f0=self.hparams.use_f0,
+            use_transformer_flows=self.hparams.use_transformer_flows,
         )
         self.model_d = MultiPeriodDiscriminator(
             use_spectral_norm=self.hparams.use_spectral_norm
         )
-        self.model_d_mrd = MultiResolutionDiscriminator(
-            use_spectral_norm=self.hparams.use_spectral_norm
+        self.model_d_mrd = (
+            MultiResolutionDiscriminator(use_spectral_norm=self.hparams.use_spectral_norm)
+            if self.hparams.use_mrd
+            else None
         )
-        self.model_d_dur = DurationDiscriminator(
-            in_channels=self.hparams.hidden_channels,
-            filter_channels=self.hparams.hidden_channels,
-            kernel_size=3,
-            p_dropout=self.hparams.p_dropout,
-            gin_channels=self.hparams.gin_channels,
+        self.model_d_dur = (
+            DurationDiscriminator(
+                in_channels=self.hparams.hidden_channels,
+                filter_channels=self.hparams.hidden_channels,
+                kernel_size=3,
+                p_dropout=self.hparams.p_dropout,
+                gin_channels=self.hparams.gin_channels,
+            )
+            if self.hparams.use_dur_disc
+            else None
         )
 
         # Dataset splits
@@ -216,7 +230,7 @@ class VitsModel(pl.LightningModule):
     def training_step(self, batch: Batch, batch_idx: int):
         opt_g, opt_d = self.optimizers()
 
-        loss_gen_all = self.training_step_g(batch)
+        loss_gen_all, _loss_mel = self.training_step_g(batch)
         opt_g.zero_grad()
         self.manual_backward(loss_gen_all)
         opt_g.step()
@@ -300,12 +314,19 @@ class VitsModel(pl.LightningModule):
         self._y = y
 
         _y_d_hat_r, y_d_hat_g, fmap_r, fmap_g = self.model_d(y, y_hat)
-        _y_d_hat_r_mrd, y_d_hat_g_mrd, fmap_r_mrd, fmap_g_mrd = self.model_d_mrd(
-            y, y_hat
-        )
-        _dur_probs_r, dur_probs_hat = self.model_d_dur(
-            x_hidden, x_mask, logw_, logw
-        )
+
+        loss_fm = feature_loss(fmap_r, fmap_g)
+        loss_gen_mrd = torch.zeros(1, device=y.device)
+        loss_dur_gen = torch.zeros(1, device=y.device)
+
+        if self.model_d_mrd is not None:
+            _y_d_hat_r_mrd, y_d_hat_g_mrd, fmap_r_mrd, fmap_g_mrd = self.model_d_mrd(y, y_hat)
+            loss_fm = loss_fm + feature_loss(fmap_r_mrd, fmap_g_mrd)
+            loss_gen_mrd, _ = generator_loss(y_d_hat_g_mrd)
+
+        if self.model_d_dur is not None:
+            _dur_probs_r, dur_probs_hat = self.model_d_dur(x_hidden, x_mask, logw_, logw)
+            loss_dur_gen, _ = generator_loss(dur_probs_hat)
 
         with autocast(self.device.type, enabled=False):
             # Generator loss
@@ -313,12 +334,7 @@ class VitsModel(pl.LightningModule):
             loss_mel = F.l1_loss(y_mel, y_hat_mel) * self.hparams.c_mel
             loss_kl = kl_loss(z_p, logs_q, m_p, logs_p, z_mask) * self.hparams.c_kl
 
-            loss_fm = feature_loss(fmap_r, fmap_g) + feature_loss(
-                fmap_r_mrd, fmap_g_mrd
-            )
             loss_gen, _losses_gen = generator_loss(y_d_hat_g)
-            loss_gen_mrd, _losses_gen_mrd = generator_loss(y_d_hat_g_mrd)
-            loss_dur_gen, _losses_dur_gen = generator_loss(dur_probs_hat)
 
             loss_gen_all = (
                 loss_gen
@@ -332,10 +348,6 @@ class VitsModel(pl.LightningModule):
             )
 
             self.log("loss_gen_all", loss_gen_all)
-            # Logged separately so progress is comparable against runs/architectures
-            # that don't have the same set of summed loss terms (e.g. original
-            # Piper without MRD/duration-discriminator/transformer-flow/F0
-            # predictor additions).
             self.log("loss_mel", loss_mel)
             self.log("loss_kl", loss_kl)
             self.log("loss_dur", loss_dur)
@@ -345,37 +357,37 @@ class VitsModel(pl.LightningModule):
             self.log("loss_fm", loss_fm)
             self.log("loss_f0", l_f0)
 
-            return loss_gen_all
+            return loss_gen_all, loss_mel
 
     def training_step_d(self, batch: Batch):
         # From training_step_g
         y = self._y
         y_hat = self._y_hat
         y_d_hat_r, y_d_hat_g, _, _ = self.model_d(y, y_hat.detach())
-        y_d_hat_r_mrd, y_d_hat_g_mrd, _, _ = self.model_d_mrd(y, y_hat.detach())
-        dur_probs_r, dur_probs_hat = self.model_d_dur(
-            self._dur_x.detach(),
-            self._dur_mask,
-            self._dur_real.detach(),
-            self._dur_fake.detach(),
-        )
+
+        loss_disc_mrd = torch.zeros(1, device=y.device)
+        loss_disc_dur = torch.zeros(1, device=y.device)
+
+        if self.model_d_mrd is not None:
+            y_d_hat_r_mrd, y_d_hat_g_mrd, _, _ = self.model_d_mrd(y, y_hat.detach())
+            loss_disc_mrd, _, _ = discriminator_loss(y_d_hat_r_mrd, y_d_hat_g_mrd)
+
+        if self.model_d_dur is not None:
+            dur_probs_r, dur_probs_hat = self.model_d_dur(
+                self._dur_x.detach(),
+                self._dur_mask,
+                self._dur_real.detach(),
+                self._dur_fake.detach(),
+            )
+            loss_disc_dur, _, _ = discriminator_loss(dur_probs_r, dur_probs_hat)
 
         with autocast(self.device.type, enabled=False):
-            # Discriminator
             loss_disc, _losses_disc_r, _losses_disc_g = discriminator_loss(
                 y_d_hat_r, y_d_hat_g
-            )
-            loss_disc_mrd, _losses_disc_r_mrd, _losses_disc_g_mrd = discriminator_loss(
-                y_d_hat_r_mrd, y_d_hat_g_mrd
-            )
-            loss_disc_dur, _losses_disc_r_dur, _losses_disc_g_dur = discriminator_loss(
-                dur_probs_r, dur_probs_hat
             )
             loss_disc_all = loss_disc + loss_disc_mrd + loss_disc_dur
 
             self.log("loss_disc_all", loss_disc_all)
-            # loss_disc alone is the term comparable against the original
-            # Piper's loss_disc_all (which had no MRD/duration discriminator).
             self.log("loss_disc", loss_disc)
             self.log("loss_disc_mrd", loss_disc_mrd)
             self.log("loss_disc_dur", loss_disc_dur)
@@ -383,8 +395,13 @@ class VitsModel(pl.LightningModule):
             return loss_disc_all
 
     def validation_step(self, batch: Batch, batch_idx: int):
-        val_loss = self.training_step_g(batch) + self.training_step_d(batch)
+        loss_gen_all, loss_mel = self.training_step_g(batch)
+        val_loss = loss_gen_all + self.training_step_d(batch)
         self.log("val_loss", val_loss)
+        # Non-adversarial reconstruction loss -- unlike val_loss (which mixes
+        # in GAN terms that don't track audio quality monotonically), this is
+        # a sane "best model" signal for ModelCheckpoint to monitor.
+        self.log("val_loss_mel", loss_mel)
 
         # Generate audio examples
         for utt_idx, test_utt in enumerate(self._test_dataset):
@@ -409,11 +426,12 @@ class VitsModel(pl.LightningModule):
         return val_loss
 
     def configure_optimizers(self):
-        discriminator_params = itertools.chain(
-            self.model_d.parameters(),
-            self.model_d_mrd.parameters(),
-            self.model_d_dur.parameters(),
-        )
+        disc_param_groups = [self.model_d.parameters()]
+        if self.model_d_mrd is not None:
+            disc_param_groups.append(self.model_d_mrd.parameters())
+        if self.model_d_dur is not None:
+            disc_param_groups.append(self.model_d_dur.parameters())
+        discriminator_params = itertools.chain(*disc_param_groups)
         optimizers = [
             torch.optim.AdamW(
                 self.model_g.parameters(),
@@ -466,5 +484,11 @@ class VitsModel(pl.LightningModule):
         parser.add_argument("--filter-channels", type=int, default=768)
         parser.add_argument("--n-layers", type=int, default=6)
         parser.add_argument("--n-heads", type=int, default=2)
+        # Architecture flags (default=True = full Piper-Modern; set False for baseline/ablation)
+        parser.add_argument("--use-snake", type=lambda x: x.lower() != "false", default=True)
+        parser.add_argument("--use-mrd", type=lambda x: x.lower() != "false", default=True)
+        parser.add_argument("--use-dur-disc", type=lambda x: x.lower() != "false", default=True)
+        parser.add_argument("--use-transformer-flows", type=lambda x: x.lower() != "false", default=True)
+        parser.add_argument("--use-f0", type=lambda x: x.lower() != "false", default=True)
         #
         return parent_parser

@@ -1,0 +1,55 @@
+# Piper-Modern config — full architecture with all 4 additions.
+# Matches the actual version_12 training run (best checkpoint: epoch 863).
+#
+# Architecture additions vs baseline-vits.yaml:
+#   use_snake: true           → Snake1d activations in generator
+#   use_mrd: true             → MultiResolutionDiscriminator alongside MPD
+#   use_dur_disc: true        → DurationDiscriminator adversarial loss
+#   use_transformer_flows: true → Transformer-augmented coupling layers
+#   use_f0: true              → F0 predictor + f0_cond in decoder
+
+accelerator: gpu
+devices: "2"
+strategy: ddp_find_unused_parameters_true
+precision: bf16-mixed
+max_epochs: 10000
+seed: 1234
+
+# Dataset
+dataset_dir: /home/dev/data_preprocessed
+
+# Model dimensions
+quality: medium
+hidden_channels: 192
+inter_channels: 192
+filter_channels: 768
+n_layers: 6
+n_heads: 2
+resblock: "2"
+resblock_kernel_sizes: [3, 5, 7]
+resblock_dilation_sizes: [[1, 2], [2, 6], [3, 12]]
+upsample_rates: [8, 8, 4]
+upsample_initial_channel: 256
+upsample_kernel_sizes: [16, 16, 8]
+
+# Training
+batch_size: 16
+num_workers: 8
+learning_rate: 0.0002
+betas: [0.8, 0.99]
+eps: 1.0e-09
+lr_decay: 0.999875
+segment_size: 8192
+max_phoneme_ids: 400
+validation_split: 0.05
+num_test_examples: 5
+checkpoint_epochs: 1
+c_mel: 45
+c_kl: 1.0
+
+# Architecture flags — ALL TRUE for full Piper-Modern
+use_snake: true
+use_mrd: true
+use_dur_disc: true
+use_transformer_flows: true
+use_f0: true
