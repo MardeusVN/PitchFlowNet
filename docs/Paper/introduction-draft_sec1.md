@@ -21,11 +21,11 @@ audio quality and expressiveness that trail current autoregressive systems.
 This paper asks whether that quality gap can be narrowed without abandoning the
 non-autoregressive, edge-deployable profile that makes VITS and Piper practical in the
 first place, rather than closing it by scaling up toward an autoregressive, GPU-class
-model. We present Piper-Modern, which keeps the VITS/Piper backbone — and therefore its
+model. We present Banhmi-TTS, which keeps the VITS/Piper backbone — and therefore its
 real-time, CPU-only inference profile — unchanged, while replacing four of its
 components, drawn from three prior systems — BigVGAN, VITS2, and FastPitch — that have
 so far only been validated in multi-speaker, high-resource, or non-flow-based settings.
-At inference time Piper-Modern has 17.9M parameters (25.2M including the
+At inference time Banhmi-TTS has 17.9M parameters (25.2M including the
 training-only posterior encoder used for the variational objective) — two orders of
 magnitude smaller than Qwen3-TTS's 0.6B–1.7B. The four replaced components are:
 
@@ -50,7 +50,7 @@ that regime, rather than assuming composability as a foregone conclusion.
 
 The rest of the paper is organized as follows. Section 2 traces each of these four
 components to its source and states precisely what combination has not, to our
-knowledge, been published before. Section 3 describes the resulting Piper-Modern
+knowledge, been published before. Section 3 describes the resulting Banhmi-TTS
 architecture. Section 4 details the dataset, preprocessing pipeline, and experimental
 setup, and Section 5 reports results and ablations. Section 6 concludes and discusses
 limitations.

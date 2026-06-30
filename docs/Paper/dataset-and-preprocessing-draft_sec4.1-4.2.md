@@ -69,7 +69,7 @@ pipe-delimited lines into the current field. `git blame` confirms this behavior 
 authored 2022-11-11 in the original Piper `preprocess.py` (then `larynx_train`),
 predating this project — see Hansen (n.d.) in References. We leave it unpatched:
 fixing it would change which rows survive parsing and would require a full
-re-training for any valid before/after comparison against the Piper-Modern run
+re-training for any valid before/after comparison against the Banhmi-TTS run
 reported here.
 
 Finally, two further tensors are derived from each utterance's waveform. A linear
@@ -162,7 +162,7 @@ domain so the predictor is not trained to regress toward zero in silence gaps.
       subsections of VITS's "3 Experiments" (with Method/architecture as their
       Section 2), not their Method section. Our paper's analogous section is
       "4. Experimental Setup," so Dataset/Preprocessing moved there; Section 3 is
-      now reserved solely for the Piper-Modern architecture description. Updated the
+      now reserved solely for the Banhmi-TTS architecture description. Updated the
       Introduction's roadmap paragraph (`introduction-draft_sec1.md`) to match. The
       F0-predictor forward-reference now says "introduced in Section 3" (no
       subsection decimal) since Architecture's internal subsection numbering isn't

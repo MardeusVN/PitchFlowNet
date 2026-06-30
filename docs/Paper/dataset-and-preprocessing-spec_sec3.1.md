@@ -7,7 +7,7 @@
 
 ## Problem Statement
 
-The Piper-Modern paper needs a concise, Springer-style Methodology subsection
+The Banhmi-TTS paper needs a concise, Springer-style Methodology subsection
 (`3.1 Dataset and Preprocessing`) describing the LJSpeech-based single-speaker
 preprocessing pipeline, condensed from the existing capstone report
 (`docs/data_processing.md`) into academic prose, and explicitly linking the F0
@@ -103,7 +103,7 @@ Architecture`.
 - Related Work (§2), Proposed Architecture (§3.2), Experimental Setup (§4), Results and
   Discussion (§5), Conclusion (§6) — each needs its own brainstorm/spec.
 - Deciding whether to fix the CSV-quoting bug in `preprocess.py` and re-preprocess/
-  retrain — explicitly deferred by the user; current Piper-Modern training (epoch 361+)
+  retrain — explicitly deferred by the user; current Banhmi-TTS training (epoch 361+)
   continues on the existing 12,911-row dataset.
 - Literature citations for design choices (Silero VAD, IQR outlier filtering, espeak-ng)
   — not yet researched.
@@ -115,9 +115,9 @@ Architecture`.
 ## Assumptions
 
 - Baseline (roadmap 1.1) and ablation (roadmap 1.2) training, once started, will reuse
-  the same 12,911-utterance `dataset.jsonl` as the current Piper-Modern run, not a
+  the same 12,911-utterance `dataset.jsonl` as the current Banhmi-TTS run, not a
   bug-fixed 13,100-row reprocessing. If this assumption is wrong, the eventual baseline-
-  vs-Piper-Modern and ablation comparisons would be confounded by different training
+  vs-Banhmi-TTS and ablation comparisons would be confounded by different training
   data, not just architecture.
 - The target journal's exact citation and section-numbering conventions are not yet
   fixed; minor reformatting of this subsection may be needed once a candidate journal is
@@ -144,7 +144,7 @@ Architecture`.
       report the real range (12–6,293) in Table 1 with a footnote explaining the 16
       affected rows, rather than silently excluding them or switching to median/IQR.
 - [ ] Explicit confirmation, before Priority 2 (baseline training) starts, that baseline/
-      ablation runs will use the same 12,911-row dataset as Piper-Modern.
+      ablation runs will use the same 12,911-row dataset as Banhmi-TTS.
 - [x] ~~Does the 16-row CSV-merge corruption affect the model actually reported in this
       paper?~~ — RESOLVED 2026-06-26. Checked directly against the real training run
       (`lightning_logs/version_12/hparams.yaml`): `max_phoneme_ids = 400`. Counted

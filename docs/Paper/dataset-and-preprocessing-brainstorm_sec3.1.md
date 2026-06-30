@@ -1,4 +1,4 @@
-# Brainstorm Report: Paper Preprocessing Subsection (Piper-Modern)
+# Brainstorm Report: Paper Preprocessing Subsection (Banhmi-TTS)
 
 **Date:** 2026-06-22
 **Status:** Complete — handed off to spec
@@ -16,7 +16,7 @@ codebase is expected to stay stable for the rest of the project.
 
 - **A — standalone early section** (`3. Dataset and Preprocessing`, before the method).
   Makes sense if data work is itself a contribution. Rejected: the project's main
-  contribution is the Piper-Modern architecture, not the dataset, so a standalone section
+  contribution is the Banhmi-TTS architecture, not the dataset, so a standalone section
   would be disproportionate.
 - **B — subsection inside Methodology** (`3.1 Dataset and Preprocessing`, `3.2 Proposed
   Architecture`). Mirrors how VITS/VITS2 treat their datasets — data is a means to the
@@ -46,7 +46,7 @@ training pipeline has it. This is independently corroborated by the real
 `dataset.jsonl` row count (12,911), which matches `13,100 − 189` exactly, the number of
 rows the bug was predicted to merge.
 
-Implication: the Piper-Modern run currently at epoch 361 has been training on 12,911
+Implication: the Banhmi-TTS run currently at epoch 361 has been training on 12,911
 utterances, not the full 13,100. This needs to be the reported N in the paper (truth over
 the originally-assumed round number), and — separately from the paper — the eventual
 baseline/ablation runs (roadmap 1.1/1.2) must use the same 12,911-row dataset for a fair

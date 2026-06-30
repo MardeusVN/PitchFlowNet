@@ -10,8 +10,9 @@ architecture lines (transformer-flow + duration discriminator; F0 conditioning) 
 > 2021). Subsequent vocoder work has shown both choices are suboptimal: Ziyin et al. (2020) prove that
 > ReLU-family activations cannot extrapolate periodic signals, motivating the periodic Snake activation;
 > Jang et al. (2021) show that purely time-domain discriminators miss high-frequency over-smoothing,
-> motivating the multi-resolution spectrogram discriminator (MRD). BigVGAN (Lee et al., 2023) combines
-> both and achieves state-of-the-art vocoding — but only for a two-stage, mel-conditioned generator
+> motivating the multi-resolution spectrogram discriminator (MRD), used alongside — not in place of — the
+> multi-period discriminator (MPD). BigVGAN (Lee et al., 2023) adopts Snake together with this MPD+MRD
+> discriminator pair and achieves state-of-the-art vocoding — but only for a two-stage, mel-conditioned generator
 > trained with a single adversarial objective. Whether these gains transfer to a single-stage generator
 > conditioned on a VAE-flow latent and jointly optimized against KL-divergence and duration losses, as in
 > VITS/Piper, remains untested.
@@ -23,8 +24,9 @@ architecture lines (transformer-flow + duration discriminator; F0 conditioning) 
 > al. (2020) chứng minh rằng các activation thuộc họ ReLU không thể extrapolate tín hiệu tuần hoàn, từ đó
 > đề xuất Snake activation mang tính tuần hoàn; Jang et al. (2021) chỉ ra rằng discriminator chỉ xử lý
 > miền thời gian bỏ lọt lỗi over-smoothing ở dải tần cao, từ đó đề xuất multi-resolution spectrogram
-> discriminator (MRD). BigVGAN (Lee et al., 2023) kết hợp cả hai và đạt state-of-the-art về chất lượng
-> vocoding — nhưng chỉ trong bối cảnh một generator hai giai đoạn (two-stage), nhận mel-spectrogram làm
+> discriminator (MRD), dùng **thêm cạnh** — không phải thay thế — multi-period discriminator (MPD). BigVGAN
+> (Lee et al., 2023) áp dụng Snake cùng với cặp discriminator MPD+MRD này và đạt state-of-the-art về chất
+> lượng vocoding — nhưng chỉ trong bối cảnh một generator hai giai đoạn (two-stage), nhận mel-spectrogram làm
 > điều kiện, huấn luyện với một mục tiêu adversarial duy nhất. Liệu những cải thiện này có giữ nguyên khi
 > áp dụng cho một generator một giai đoạn (single-stage), nhận điều kiện từ một latent của VAE-flow, và
 > được tối ưu đồng thời với KL-divergence và duration loss, như trong VITS/Piper — vẫn chưa được kiểm chứng.
@@ -32,7 +34,7 @@ architecture lines (transformer-flow + duration discriminator; F0 conditioning) 
 ## Expanded version (for Architecture/design-rationale section, not Related Work)
 
 The condensed paragraph above is for §2 (Related Work). The full theoretical/empirical justification below
-belongs in the Architecture section when justifying why Piper-Modern's generator/discriminator design
+belongs in the Architecture section when justifying why Banhmi-TTS's generator/discriminator design
 changed — not in Related Work, to keep that section from ballooning across all 3 architecture lines.
 
 - **Snake vs LeakyReLU (Ziyin, Hartwig & Ueda, 2020, NeurIPS — verified via ar5iv arXiv:2006.08195 +
@@ -98,7 +100,7 @@ changed — not in Related Work, to keep that section from ballooning across all
 
 The gap statement is a question ("does the benefit transfer?"), not a claim — it can only be answered by
 training, not by more literature/theory. Minimum rigorous design: 2×2 factorial isolating Snake and MRD,
-holding the other three Piper-Modern flags (`use_transformer_flows`, `use_dur_disc`, `use_f0`) **off** in
+holding the other three Banhmi-TTS flags (`use_transformer_flows`, `use_dur_disc`, `use_f0`) **off** in
 all four runs to avoid confounding with the other two architecture lines (which get their own ablation
 block later).
 
