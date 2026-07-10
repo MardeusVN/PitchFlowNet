@@ -61,11 +61,9 @@ class VitsModel(pl.LightningModule):
         use_spectral_norm: bool = False,
         gin_channels: int = 0,
         use_sdp: bool = True,
-        use_snake: bool = True,
-        use_mrd: bool = True,
-        use_dur_disc: bool = True,
-        use_transformer_flows: bool = True,
-        use_f0: bool = True,
+        use_bigvgan: bool = False,   # Snake1d activation + MRD discriminator
+        use_vits2: bool = False,     # transformer coupling flows + duration discriminator + noised MAS
+        use_f0: bool = False,        # F0 predictor + decoder conditioning
         segment_size: int = 8192,
         # training
         dataset: Optional[List[Union[str, Path]]] = None,
@@ -79,10 +77,11 @@ class VitsModel(pl.LightningModule):
         c_mel: int = 45,
         c_kl: float = 1.0,
         grad_clip: Optional[float] = None,
+        mas_noise_scale_decay: float = 2e-6,
         num_workers: int = 1,
         seed: int = 1234,
-        num_test_examples: int = 5,
-        validation_split: float = 0.1,
+        num_val_examples: int = 100,
+        num_test_examples: int = 500,
         max_phoneme_ids: Optional[int] = None,
         **kwargs,
     ):
@@ -97,6 +96,13 @@ class VitsModel(pl.LightningModule):
         if (self.hparams.num_speakers > 1) and (self.hparams.gin_channels <= 0):
             # Default gin_channels for multi-speaker model
             self.hparams.gin_channels = 512
+
+        # Derive low-level component flags from the three high-level group flags
+        _use_snake = self.hparams.use_bigvgan
+        _use_mrd = self.hparams.use_bigvgan
+        _use_dur_disc = self.hparams.use_vits2
+        _use_transformer_flows = self.hparams.use_vits2
+        _use_noised_mas = self.hparams.use_vits2
 
         # Set up models
         self.model_g = SynthesizerTrn(
@@ -119,16 +125,19 @@ class VitsModel(pl.LightningModule):
             n_speakers=self.hparams.num_speakers,
             gin_channels=self.hparams.gin_channels,
             use_sdp=self.hparams.use_sdp,
-            use_snake=self.hparams.use_snake,
+            use_snake=_use_snake,
             use_f0=self.hparams.use_f0,
-            use_transformer_flows=self.hparams.use_transformer_flows,
+            use_transformer_flows=_use_transformer_flows,
+            use_noised_mas=_use_noised_mas,
+            mas_noise_scale=0.01,
+            use_speaker_cond_enc=False,
         )
         self.model_d = MultiPeriodDiscriminator(
             use_spectral_norm=self.hparams.use_spectral_norm
         )
         self.model_d_mrd = (
             MultiResolutionDiscriminator(use_spectral_norm=self.hparams.use_spectral_norm)
-            if self.hparams.use_mrd
+            if _use_mrd
             else None
         )
         self.model_d_dur = (
@@ -139,7 +148,7 @@ class VitsModel(pl.LightningModule):
                 p_dropout=self.hparams.p_dropout,
                 gin_channels=self.hparams.gin_channels,
             )
-            if self.hparams.use_dur_disc
+            if _use_dur_disc
             else None
         )
 
@@ -147,7 +156,7 @@ class VitsModel(pl.LightningModule):
         self._train_dataset: Optional[Dataset] = None
         self._val_dataset: Optional[Dataset] = None
         self._test_dataset: Optional[Dataset] = None
-        self._load_datasets(validation_split, num_test_examples, max_phoneme_ids)
+        self._load_datasets(num_val_examples, num_test_examples, max_phoneme_ids)
 
         # State kept between training optimizers
         self._y = None
@@ -155,7 +164,7 @@ class VitsModel(pl.LightningModule):
 
     def _load_datasets(
         self,
-        validation_split: float,
+        num_val_examples: int,
         num_test_examples: int,
         max_phoneme_ids: Optional[int] = None,
     ):
@@ -166,11 +175,12 @@ class VitsModel(pl.LightningModule):
         full_dataset = PiperDataset(
             self.hparams.dataset, max_phoneme_ids=max_phoneme_ids
         )
-        valid_set_size = int(len(full_dataset) * validation_split)
-        train_set_size = len(full_dataset) - valid_set_size - num_test_examples
+        train_set_size = len(full_dataset) - num_val_examples - num_test_examples
 
         self._train_dataset, self._test_dataset, self._val_dataset = random_split(
-            full_dataset, [train_set_size, num_test_examples, valid_set_size]
+            full_dataset,
+            [train_set_size, num_test_examples, num_val_examples],
+            generator=torch.Generator().manual_seed(self.hparams.seed),
         )
 
     def forward(self, text, text_lengths, scales, sid=None):
@@ -233,12 +243,22 @@ class VitsModel(pl.LightningModule):
         loss_gen_all, _loss_mel = self.training_step_g(batch)
         opt_g.zero_grad()
         self.manual_backward(loss_gen_all)
+        if self.hparams.grad_clip is not None:
+            self.clip_gradients(opt_g, gradient_clip_val=self.hparams.grad_clip, gradient_clip_algorithm="norm")
         opt_g.step()
 
         loss_disc_all = self.training_step_d(batch)
         opt_d.zero_grad()
         self.manual_backward(loss_disc_all)
+        if self.hparams.grad_clip is not None:
+            self.clip_gradients(opt_d, gradient_clip_val=self.hparams.grad_clip, gradient_clip_algorithm="norm")
         opt_d.step()
+
+        # Anneal MAS noise scale: VITS2 schedule max(initial - step * decay, 0)
+        if self.hparams.use_vits2 and self.hparams.mas_noise_scale_decay > 0:
+            self.model_g.mas_noise_scale = max(
+                0.01 - self.global_step * self.hparams.mas_noise_scale_decay, 0.0
+            )
 
     def on_train_epoch_end(self):
         # Automatic LR scheduler stepping is disabled along with automatic
@@ -403,25 +423,32 @@ class VitsModel(pl.LightningModule):
         # a sane "best model" signal for ModelCheckpoint to monitor.
         self.log("val_loss_mel", loss_mel)
 
-        # Generate audio examples
-        for utt_idx, test_utt in enumerate(self._test_dataset):
-            text = test_utt.phoneme_ids.unsqueeze(0).to(self.device)
-            text_lengths = torch.LongTensor([len(test_utt.phoneme_ids)]).to(self.device)
-            scales = [0.667, 1.0, 0.8]
-            sid = (
-                test_utt.speaker_id.to(self.device)
-                if test_utt.speaker_id is not None
-                else None
-            )
-            test_audio = self(text, text_lengths, scales, sid=sid).detach()
+        # Generate audio examples — only on the first val batch to avoid
+        # running num_val_batches × num_test_examples synthesis calls per epoch.
+        if batch_idx == 0:
+            for utt_idx, test_utt in enumerate(list(self._test_dataset)[:5]):
+                try:
+                    text = test_utt.phoneme_ids.unsqueeze(0).to(self.device)
+                    text_lengths = torch.LongTensor([len(test_utt.phoneme_ids)]).to(self.device)
+                    scales = [0.667, 1.0, 0.8]
+                    sid = (
+                        test_utt.speaker_id.to(self.device)
+                        if test_utt.speaker_id is not None
+                        else None
+                    )
+                    test_audio = self(text, text_lengths, scales, sid=sid).detach()
 
-            # Scale to make louder in [-1, 1]
-            test_audio = test_audio * (1.0 / max(0.01, abs(test_audio.max())))
+                    # Scale to make louder in [-1, 1]
+                    test_audio = test_audio * (1.0 / max(0.01, abs(test_audio.max())))
 
-            tag = test_utt.text or str(utt_idx)
-            self.logger.experiment.add_audio(
-                tag, test_audio, sample_rate=self.hparams.sample_rate
-            )
+                    tag = test_utt.text or str(utt_idx)
+                    self.logger.experiment.add_audio(
+                        tag, test_audio, sample_rate=self.hparams.sample_rate
+                    )
+                except Exception:
+                    # Synthesis can fail early in training (NaN in bfloat16 from
+                    # unstable model state); skip the audio log rather than crash.
+                    pass
 
         return val_loss
 
@@ -470,8 +497,8 @@ class VitsModel(pl.LightningModule):
             default=8,
             help="DataLoader workers per GPU process (default tuned for a 20-core/28-thread CPU)",
         )
-        parser.add_argument("--validation-split", type=float, default=0.1)
-        parser.add_argument("--num-test-examples", type=int, default=5)
+        parser.add_argument("--num-val-examples", type=int, default=100)
+        parser.add_argument("--num-test-examples", type=int, default=500)
         parser.add_argument(
             "--max-phoneme-ids",
             type=int,
@@ -484,11 +511,16 @@ class VitsModel(pl.LightningModule):
         parser.add_argument("--filter-channels", type=int, default=768)
         parser.add_argument("--n-layers", type=int, default=6)
         parser.add_argument("--n-heads", type=int, default=2)
-        # Architecture flags (default=True = full Piper-Modern; set False for baseline/ablation)
-        parser.add_argument("--use-snake", type=lambda x: x.lower() != "false", default=True)
-        parser.add_argument("--use-mrd", type=lambda x: x.lower() != "false", default=True)
-        parser.add_argument("--use-dur-disc", type=lambda x: x.lower() != "false", default=True)
-        parser.add_argument("--use-transformer-flows", type=lambda x: x.lower() != "false", default=True)
-        parser.add_argument("--use-f0", type=lambda x: x.lower() != "false", default=True)
+        parser.add_argument("--grad-clip", type=float, default=None,
+                            help="Max gradient norm for clipping (None = disabled)")
+        # Three high-level architecture flags (default=False = vanilla VITS baseline)
+        parser.add_argument("--use-bigvgan", type=lambda x: x.lower() != "false", default=False,
+                            help="Enable BigVGAN components: Snake1d activation + MRD discriminator")
+        parser.add_argument("--use-vits2", type=lambda x: x.lower() != "false", default=False,
+                            help="Enable VITS2 components: transformer flows + duration discriminator + noised MAS")
+        parser.add_argument("--use-f0", type=lambda x: x.lower() != "false", default=False,
+                            help="Enable F0 predictor and decoder F0 conditioning")
+        parser.add_argument("--mas-noise-scale-decay", type=float, default=2e-6,
+                            help="Per-step linear decay of MAS noise scale (0 = no annealing). Default 2e-6 matches VITS2.")
         #
         return parent_parser

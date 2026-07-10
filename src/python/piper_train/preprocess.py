@@ -434,7 +434,7 @@ def ljspeech_dataset(args: argparse.Namespace) -> Iterable[Utterance]:
         wav_dir = dataset_dir / "wavs"
 
     with open(metadata_path, "r", encoding="utf-8") as csv_file:
-        reader = csv.reader(csv_file, delimiter="|")
+        reader = csv.reader(csv_file, delimiter="|", quoting=csv.QUOTE_NONE)
         for row in reader:
             assert len(row) >= 2, "Not enough columns"
 

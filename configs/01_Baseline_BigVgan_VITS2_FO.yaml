@@ -1,9 +1,9 @@
-# Baseline VITS config — vanilla Piper without any extensions.
-# All three high-level flags off → equivalent to original VITS/Piper architecture.
+# Config H — all three flags enabled: BigVGAN + VITS2 + F0
+# Corresponds to ablation Config H (use_bigvgan=T, use_vits2=T, use_f0=T).
 #
-# use_bigvgan: false  → LeakyReLU decoder, MPD only
-# use_vits2:   false  → original WaveNet coupling layers, no DurDisc, no noised MAS
-# use_f0:      false  → no F0 predictor, no f0_cond in decoder
+# use_bigvgan: true  → Snake1d activation + MRD discriminator (§2.2)
+# use_vits2:   true  → transformer coupling flows + DurDisc + noised MAS (§2.3)
+# use_f0:      true  → F0 predictor + decoder F0 conditioning (§2.4)
 
 accelerator: gpu
 devices: "2"
@@ -27,7 +27,7 @@ upsample_rates: [8, 8, 4]
 upsample_initial_channel: 256
 upsample_kernel_sizes: [16, 16, 8]
 
-batch_size: 16
+batch_size: 16  # 20/GPU OOM on RTX 4070 Ti 12GB with MRD feature_loss
 num_workers: 8
 learning_rate: 0.0002
 betas: [0.8, 0.99]
@@ -41,6 +41,6 @@ checkpoint_epochs: 1
 c_mel: 45
 c_kl: 1.0
 
-use_bigvgan: false
-use_vits2: false
-use_f0: false
+use_bigvgan: true
+use_vits2: true
+use_f0: true

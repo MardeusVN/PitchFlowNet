@@ -1,36 +1,64 @@
 # Draft: 4.1 Datasets and 4.2 Preprocessing
 
-**Date:** 2026-06-26
-**Status:** First draft — citations verified 2026-06-26 (see References); pending
-journal template pass
+**Date:** 2026-07-02
+**Status:** §4.1 updated to reflect QUOTE_NONE fix (0 parsing drops, 0 phoneme-cap drops,
+split 12,500/100/500); §4.2 updated accordingly. Numbers now match dataset.jsonl (wc -l = 13,100).
 
 ---
 
-## 4.1 Datasets
+## 4.1 Datasets (LaTeX, final)
 
-We train on the LJSpeech corpus (Ito and Johnson, 2017), a public-domain,
-single-speaker English audiobook-reading dataset distributed as 22,050 Hz mono WAV
-recordings with a pipe-delimited transcript file. Each row provides three fields — an
+```latex
+\subsection{Dataset}\label{subsec-dataset}
+
+We train on the LJSpeech corpus \cite{bibljspeech}, a public-domain single-speaker
+English audiobook-reading dataset distributed as 22{,}050~Hz mono WAV recordings with
+a pipe-delimited transcript file. Each transcript row provides three fields — an
 identifier, a raw transcription, and a normalized transcription with numbers,
-ordinals, and monetary units expanded into words (Ito and Johnson, 2017); our
-pipeline reads the third (normalized-transcription) field of each row as the G2P
-input text. Of the 13,100 nominal recordings, preprocessing yields *N* = 12,895
-utterances totaling 23.56 h of speech used for gradient updates — §4.2 details the
-189 + 16 utterances excluded along the way. We randomly split these into 12,246
-training, 644 validation (5%), and 5 fixed test utterances.
+ordinals, and monetary units expanded into words; our pipeline reads the third
+(normalized-transcription) field as the grapheme-to-phoneme (G2P) input text. The
+choice of a single-speaker corpus is consistent with the goal of training one specific
+voice, as multi-speaker training would require additional speaker-identity
+conditioning (speaker embeddings) and substantially more data to achieve comparable
+per-speaker quality.
 
-**Table 1.** Dataset statistics (*N* = 12,911 after CSV parsing; *N* = 12,895
-effectively used for gradient updates after the training-time phoneme-length cap, see
-§4.2).
+All 13{,}100 recordings are successfully parsed: the transcript-reading routine uses
+\texttt{csv.QUOTE\_NONE} mode, which treats every character literally and prevents the
+1{,}052 unescaped double-quote characters in the pipe-delimited transcript file from
+being interpreted as field delimiters. No rows are dropped or corrupted at the parsing
+stage. All utterances additionally satisfy the training-time phoneme-sequence-length
+cap (\texttt{max\_phoneme\_ids}~=~400); the longest phonemizes to 399~IDs, so no
+entry is excluded before any gradient update. The effective training corpus is therefore
+the full \textit{N}~=~13{,}100 utterances totaling 23.92~h of speech. We partition
+these with a deterministic random split (seed 1234) into 12{,}500 training, 100
+validation, and 500 held-out test utterances.
 
-| Format | Sample rate | N (post-parsing) | N (effective, training) | Total duration | Duration range | Transcript-length range (post-parsing / effective) |
-|---|---|---|---|---|---|---|
-| LJSpeech (single-speaker) | 22,050 Hz | 12,911 | 12,895 | 23.56 h | 1.11–10.10 s | 12–6,293¹ / 12–187 characters |
+\begin{table}[h]
+\centering
+\caption{Corpus statistics.}
+\label{tab:dataset-stats}
+\begin{tabular}{ll}
+\toprule
+\textbf{Attribute} & \textbf{Value} \\
+\midrule
+Audio format                  & PCM, mono, 16-bit \\
+Sample rate                   & 22{,}050~Hz \\
+Utterances (raw)              & 13{,}100 \\
+Utterances (post-parsing)     & 13{,}100 \\
+Utterances (effective training) & 13{,}100 \\
+Number of speakers            & 1 \\
+Total duration (training)     & 23.92~h \\
+Duration range                & 1.11--10.10~s \\
+Transcript length (training)  & 12--187 characters \\
+Train / Val / Test split      & 12{,}500 / 100 / 500 \\
+\bottomrule
+\end{tabular}
+\end{table}
+```
 
-¹ The 12–6,293-character range reflects all 12,911 post-parsing rows, including the
-16 transcript-merging artifacts described in §4.2 (up to 6,293 characters each). All
-16 exceed the training-time phoneme-length cap and are excluded before reaching the
-model; the 12,895 effective training rows have a clean range of 12–187 characters.
+**Citation key used:** `bibljspeech` (Ito & Johnson, 2017) — only external source cited
+in this subsection; the CSV bug, phoneme cap, and split are internal pipeline facts, no
+citation needed.
 
 ## 4.2 Preprocessing
 
@@ -44,33 +72,19 @@ scans cached audio/spectrogram tensors and deletes any that fail to deserialize.
 Tukey-fence speaking-rate outlier filter (keep if rate ∈ [Q1 − 2·IQR, Q3 + 2·IQR] per
 speaker, rate computed as non-punctuation character count over VAD-measured speech
 duration; Tukey, 1977) is implemented in the codebase but was not applied to the run
-reported here; we note this because it is the step a reviewer might otherwise expect
-to catch the transcript-merging artifacts described next — since it did not run, those
-artifacts reach the training-time phoneme cap (step 4) instead.
+reported here; no speaking-rate filtering occurs between parsing and the phoneme-cap step.
 
-A data-integrity artifact in the transcript-parsing routine of the upstream Piper
-training pipeline that our preprocessing builds on* removes 189 utterances outright
-and corrupts 16 surviving entries, whose transcript field contains text concatenated
-from neighboring rows (up to 6,293 characters) misaligned with the single ~6 s audio
-file each entry still references; for the 12,895 cleanly-parsed rows, the three-field
-row structure is intact, so the field read as G2P input is reliably the normalized
-transcription as intended. All 16 corrupted entries' merged transcripts phonemize to
-between 529 and 17,853 phoneme ids, exceeding the training-time phoneme-length cap
-(step 4, `max_phoneme_ids = 400`), so the data loader excludes every one of them
-before a gradient update; no legitimately long, uncorrupted utterance is excluded by
-this same cap (the longest phonemizes to 399 ids, one below the threshold). The
-effective utterance count used for training is consequently *N* = 12,895, not
-12,911 (Table 1, §4.1).
-
-\* The transcript file is read with Python's default `csv.reader` quoting behavior
-(`QUOTE_MINIMAL` rather than `QUOTE_NONE`); 1,052 unescaped double-quote characters
-cause the reader to treat a `"` as an unterminated quote and fold subsequent
-pipe-delimited lines into the current field. `git blame` confirms this behavior was
-authored 2022-11-11 in the original Piper `preprocess.py` (then `larynx_train`),
-predating this project — see Hansen (n.d.) in References. We leave it unpatched:
-fixing it would change which rows survive parsing and would require a full
-re-training for any valid before/after comparison against the Banhmi-TTS run
-reported here.
+The transcript file is read with `csv.QUOTE_NONE`, which treats every character
+literally. The upstream Piper pipeline originally used Python's default
+`csv.QUOTE_MINIMAL` mode; the 1,052 unescaped double-quote characters in the
+pipe-delimited LJSpeech transcript caused that reader to fold subsequent rows into the
+current field, silently dropping 189 utterances and corrupting 16 further entries whose
+phoneme sequences reached 529–17,853 IDs. We corrected this by passing
+`quoting=csv.QUOTE_NONE` to `csv.reader` in `preprocess.py`. After the fix all
+13,100 rows parse to well-formed three-field entries and all phoneme sequences fall
+within the training-time cap (`max_phoneme_ids = 400`; longest: 399 IDs), so no
+utterance is excluded at step 4. The effective training corpus is the full
+*N* = 13,100 utterances (Table 1, §4.1).
 
 Finally, two further tensors are derived from each utterance's waveform. A linear
 spectrogram is computed via the short-time Fourier transform — FFT size, window size,
@@ -84,10 +98,11 @@ itself fed to the posterior encoder. A per-frame fundamental-frequency (F0) cont
 separately extracted offline with the `pyworld` (Morise et al., 2016) DIO+StoneMask
 pitch-tracking algorithm and cached; it conditions the decoder and serves as the
 regression target for the F0 predictor introduced in Section 3. Because the F0 contour
-must share the linear spectrogram's frame count and `pyworld` consistently returns one
-more frame than the spectrogram at our hop length and sample rate, we edge-crop the
-F0 contour to match, and linearly interpolate unvoiced (F0 = 0) frames in the log
-domain so the predictor is not trained to regress toward zero in silence gaps.
+must share the linear spectrogram's frame count and `pyworld` returns one extra frame
+at our hop length and sample rate, the F0 contour is truncated (if longer) or
+edge-padded with the last value (if shorter) to match; unvoiced (F0 = 0) frames are
+then linearly interpolated in the log domain so the predictor is not trained to
+regress toward zero in silence gaps.
 
 ---
 

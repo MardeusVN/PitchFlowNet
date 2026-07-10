@@ -191,7 +191,6 @@ class F0Predictor(nn.Module):
         self.proj = nn.Conv1d(filter_channels, 1, 1)
 
     def forward(self, x, x_mask):
-        x = torch.detach(x)
         x = self.conv_1(x * x_mask)
         x = torch.relu(x)
         x = self.norm_1(x)
@@ -215,6 +214,7 @@ class TextEncoder(nn.Module):
         n_layers: int,
         kernel_size: int,
         p_dropout: float,
+        gin_channels: int = 0,
     ):
         super().__init__()
         self.n_vocab = n_vocab
@@ -234,13 +234,19 @@ class TextEncoder(nn.Module):
         )
         self.proj = nn.Conv1d(hidden_channels, out_channels * 2, 1)
 
-    def forward(self, x, x_lengths):
+        # VITS2: speaker embedding projected into text-encoder hidden space
+        if gin_channels > 0:
+            self.cond = nn.Conv1d(gin_channels, hidden_channels, 1)
+
+    def forward(self, x, x_lengths, g=None):
         x = self.emb(x) * math.sqrt(self.hidden_channels)  # [b, t, h]
         x = torch.transpose(x, 1, -1)  # [b, h, t]
         x_mask = torch.unsqueeze(
             commons.sequence_mask(x_lengths, x.size(2)), 1
         ).type_as(x)
 
+        if g is not None:
+            x = x + self.cond(g)
         x = self.encoder(x * x_mask, x_mask)
         stats = self.proj(x) * x_mask
 
@@ -250,9 +256,9 @@ class TextEncoder(nn.Module):
 
 class TransformerCouplingLayer(nn.Module):
     """VITS2-style residual coupling layer: same affine-coupling math as
-    modules.ResidualCouplingLayer, but the conditioner network (which
-    predicts the affine params from x0) gets an extra self-attention pass
-    for global context, on top of the existing WaveNet-style conv stack (WN).
+    modules.ResidualCouplingLayer, but the conditioner network gains a
+    self-attention pass (pre-WN) that captures global phoneme context before
+    the local WaveNet refines it — following Conformer-style coarse→fine ordering.
 
     Invertibility is unaffected: x1 is still an invertible affine function
     of x0 alone; making the *function that computes the affine params*
@@ -304,8 +310,8 @@ class TransformerCouplingLayer(nn.Module):
     def forward(self, x, x_mask, g=None, reverse=False):
         x0, x1 = torch.split(x, [self.half_channels] * 2, 1)
         h = self.pre(x0) * x_mask
-        h = self.enc(h, x_mask, g=g)
         h = h + self.attn(h, x_mask)
+        h = self.enc(h, x_mask, g=g)
         stats = self.post(h) * x_mask
         if not self.mean_only:
             m, logs = torch.split(stats, [self.half_channels] * 2, 1)
@@ -769,6 +775,8 @@ class DiscriminatorR(torch.nn.Module):
         super().__init__()
         self.resolution = resolution
         self.LRELU_SLOPE = 0.1
+        n_fft, hop_length, win_length = resolution
+        self.register_buffer('hann_window', torch.hann_window(win_length))
         norm_f = weight_norm if not use_spectral_norm else spectral_norm
         self.convs = nn.ModuleList(
             [
@@ -794,6 +802,7 @@ class DiscriminatorR(torch.nn.Module):
                 n_fft=n_fft,
                 hop_length=hop_length,
                 win_length=win_length,
+                window=self.hann_window,
                 center=False,
                 return_complex=True,
             )
@@ -880,6 +889,9 @@ class SynthesizerTrn(nn.Module):
         use_snake: bool = True,
         use_f0: bool = True,
         use_transformer_flows: bool = True,
+        use_noised_mas: bool = False,
+        mas_noise_scale: float = 0.01,
+        use_speaker_cond_enc: bool = False,
     ):
 
         super().__init__()
@@ -904,6 +916,9 @@ class SynthesizerTrn(nn.Module):
 
         self.use_sdp = use_sdp
         self.use_f0 = use_f0
+        self.use_noised_mas = use_noised_mas
+        self.mas_noise_scale = mas_noise_scale
+        self.use_speaker_cond_enc = use_speaker_cond_enc
 
         self.enc_p = TextEncoder(
             n_vocab,
@@ -914,6 +929,7 @@ class SynthesizerTrn(nn.Module):
             n_layers,
             kernel_size,
             p_dropout,
+            gin_channels=gin_channels if use_speaker_cond_enc else 0,
         )
         self.dec = Generator(
             inter_channels,
@@ -959,11 +975,14 @@ class SynthesizerTrn(nn.Module):
 
     def forward(self, x, x_lengths, y, y_lengths, sid=None, f0=None):
 
-        x, m_p, logs_p, x_mask = self.enc_p(x, x_lengths)
         if self.n_speakers > 1:
             g = self.emb_g(sid).unsqueeze(-1)  # [b, h, 1]
         else:
             g = None
+
+        x, m_p, logs_p, x_mask = self.enc_p(
+            x, x_lengths, g=g if self.use_speaker_cond_enc else None
+        )
 
         z, m_q, logs_q, y_mask = self.enc_q(y, y_lengths, g=g)
         z_p = self.flow(z, y_mask, g=g)
@@ -986,8 +1005,15 @@ class SynthesizerTrn(nn.Module):
             neg_cent = neg_cent1 + neg_cent2 + neg_cent3 + neg_cent4
 
             attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
+            # VITS2: optionally perturb alignment scores with Gaussian noise
+            # so MAS explores slightly softer paths during training.
+            neg_cent_input = neg_cent
+            if self.use_noised_mas:
+                # Match VITS2: scale noise by std of alignment scores so effective
+                # perturbation is proportional to score magnitude, not fixed absolute.
+                neg_cent_input = neg_cent + torch.randn_like(neg_cent) * self.mas_noise_scale * neg_cent.std().detach()
             attn = (
-                monotonic_align.maximum_path(neg_cent, attn_mask.squeeze(1))
+                monotonic_align.maximum_path(neg_cent_input, attn_mask.squeeze(1))
                 .unsqueeze(1)
                 .detach()
             )
@@ -1064,11 +1090,15 @@ class SynthesizerTrn(nn.Module):
             logw = self.dp(x, x_mask, g=g, reverse=True, noise_scale=noise_scale_w)
         else:
             logw = self.dp(x, x_mask, g=g)
+        # Guard against NaN/inf in bfloat16: clean logw, then clamp w and y_lengths
+        # so sequence_mask never receives a zero or negative length.
+        logw = torch.nan_to_num(logw, nan=0.0, posinf=6.0, neginf=-6.0).clamp(-6, 6)
         w = torch.exp(logw) * x_mask * length_scale
-        w_ceil = torch.ceil(w)
-        y_lengths = torch.clamp_min(torch.sum(w_ceil, [1, 2]), 1).long()
+        w = torch.nan_to_num(w, nan=1.0, posinf=403.0, neginf=0.0)
+        w_ceil = torch.ceil(w).clamp(min=0, max=500)
+        y_lengths = torch.clamp(torch.sum(w_ceil, [1, 2]), min=1, max=10000).long()
         y_mask = torch.unsqueeze(
-            commons.sequence_mask(y_lengths, y_lengths.max()), 1
+            commons.sequence_mask(y_lengths, y_lengths.max().item()), 1
         ).type_as(x_mask)
         attn_mask = torch.unsqueeze(x_mask, 2) * torch.unsqueeze(y_mask, -1)
         attn = commons.generate_path(w_ceil, attn_mask)

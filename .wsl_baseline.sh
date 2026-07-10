@@ -12,7 +12,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 python -m piper_train \
     --dataset-dir /home/dev/data_preprocessed \
-    --default_root_dir /home/dev/01_Baseline_BigVgan_VITS2_FO \
+    --default_root_dir /home/dev/02_Baseline_VanillaVITS \
     --accelerator gpu \
     --devices 2 \
     --strategy ddp_find_unused_parameters_true \
@@ -23,8 +23,7 @@ python -m piper_train \
     --max_epochs 1100 \
     --checkpoint-epochs 1 \
     --seed 1234 \
-    --use-bigvgan true \
-    --use-vits2 true \
-    --use-f0 true \
-    --grad-clip 1.0 \
-    --resume_from_checkpoint /home/dev/01_Baseline_BigVgan_VITS2_FO/lightning_logs/version_1/checkpoints/last.ckpt
+    --use-bigvgan false \
+    --use-vits2 false \
+    --use-f0 false \
+    --grad-clip 1.0

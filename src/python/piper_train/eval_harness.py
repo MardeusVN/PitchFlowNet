@@ -62,6 +62,8 @@ class CheckpointReport:
     mean_utmos: float
     median_utmos: float
     mean_rtf: float
+    f0_rmse: Optional[float] = None
+    f0_corr: Optional[float] = None
 
 
 def text_to_phoneme_ids(text: str, language: str = "en-us"):
@@ -128,6 +130,81 @@ def synthesize(model: VitsModel, text: str, language: str, scales, sample_rate: 
     return audio, infer_sec, audio_duration_sec, rtf
 
 
+def collect_f0_pairs(
+    model: VitsModel,
+    dataset_entries: List[dict],
+) -> tuple:
+    """Aggregate predicted vs GT log-F0 pairs across all entries for global metrics.
+
+    Predicted phoneme-level log-F0 comes from model.f0_predictor; GT phoneme-level
+    log-F0 is derived by averaging the cached frame-level F0 over intervals defined
+    by the SDP predicted durations (same projection used during training via MAS).
+
+    Returns (f0_rmse, f0_corr) or (None, None) if model has no F0 predictor.
+    """
+    if not model.model_g.use_f0:
+        return None, None
+
+    all_pred: List[float] = []
+    all_gt: List[float] = []
+
+    for entry in dataset_entries:
+        phoneme_ids = entry.get("phoneme_ids")
+        f0_path_str = entry.get("audio_f0_path")
+        if not phoneme_ids or not f0_path_str:
+            continue
+        f0_path = pathlib.Path(f0_path_str)
+        if not f0_path.exists():
+            continue
+
+        try:
+            ids_t = torch.LongTensor(phoneme_ids).unsqueeze(0)
+            lengths_t = torch.LongTensor([len(phoneme_ids)])
+
+            with torch.no_grad():
+                x, _, _, x_mask = model.model_g.enc_p(ids_t, lengths_t)
+                log_f0_pred = model.model_g.f0_predictor(x, x_mask).squeeze().numpy()
+
+                logw = model.model_g.dp(x, x_mask, reverse=True, noise_scale=0.8)
+                logw = torch.nan_to_num(logw, nan=0.0).clamp(-6.0, 6.0)
+                w = torch.exp(logw) * x_mask
+                durations = torch.ceil(w).clamp(min=0, max=500).squeeze().long().numpy()
+
+            gt_f0_frame = torch.load(f0_path, weights_only=True).numpy()
+
+            frame_ptr = 0
+            phoneme_gt: List[float] = []
+            for dur in durations:
+                dur = int(dur)
+                if dur <= 0 or frame_ptr >= len(gt_f0_frame):
+                    phoneme_gt.append(1.0)
+                else:
+                    end = min(frame_ptr + dur, len(gt_f0_frame))
+                    phoneme_gt.append(float(np.mean(gt_f0_frame[frame_ptr:end])))
+                    frame_ptr = end
+
+            log_gt = np.log(np.maximum(np.array(phoneme_gt, dtype=np.float32), 1.0))
+            n = min(len(log_f0_pred), len(log_gt))
+            all_pred.extend(log_f0_pred[:n].tolist())
+            all_gt.extend(log_gt[:n].tolist())
+
+        except Exception as exc:
+            _LOGGER.warning("F0 eval skipped for one entry: %s", exc)
+
+    if len(all_pred) < 2:
+        return None, None
+
+    pred_arr = np.array(all_pred, dtype=np.float32)
+    gt_arr = np.array(all_gt, dtype=np.float32)
+    rmse = float(np.sqrt(np.mean((pred_arr - gt_arr) ** 2)))
+    corr = (
+        float(np.corrcoef(pred_arr, gt_arr)[0, 1])
+        if np.std(pred_arr) > 1e-9 and np.std(gt_arr) > 1e-9
+        else 0.0
+    )
+    return rmse, corr
+
+
 def evaluate_checkpoint(
     checkpoint: pathlib.Path,
     sentences: List[str],
@@ -137,6 +214,7 @@ def evaluate_checkpoint(
     scales,
     sample_rate: int,
     wav_out_dir: Optional[pathlib.Path],
+    dataset_entries: Optional[List[dict]] = None,
 ) -> CheckpointReport:
     _LOGGER.info("Loading checkpoint: %s", checkpoint)
     model = VitsModel.load_from_checkpoint(
@@ -199,6 +277,13 @@ def evaluate_checkpoint(
     utmoses = [r.utmos for r in results]
     rtfs = [r.real_time_factor for r in results]
 
+    f0_rmse, f0_corr = None, None
+    if dataset_entries:
+        _LOGGER.info("Computing F0 metrics over %d dataset entries...", len(dataset_entries))
+        f0_rmse, f0_corr = collect_f0_pairs(model, dataset_entries)
+        if f0_rmse is not None:
+            _LOGGER.info("F0 RMSE=%.4f  F0 Corr=%.4f", f0_rmse, f0_corr)
+
     return CheckpointReport(
         checkpoint=str(checkpoint),
         results=results,
@@ -207,6 +292,8 @@ def evaluate_checkpoint(
         mean_utmos=float(np.mean(utmoses)),
         median_utmos=float(np.median(utmoses)),
         mean_rtf=float(np.mean(rtfs)),
+        f0_rmse=f0_rmse,
+        f0_corr=f0_corr,
     )
 
 
@@ -278,6 +365,17 @@ def main():
     )
     _LOGGER.info("Loaded %d sentences", len(sentences))
 
+    # Load full dataset entries for F0 evaluation (only when JSONL is provided)
+    dataset_entries: Optional[List[dict]] = None
+    if args.dataset_jsonl is not None and args.dataset_jsonl.exists():
+        dataset_entries = []
+        with open(args.dataset_jsonl, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    dataset_entries.append(json.loads(line))
+        _LOGGER.info("Loaded %d dataset entries for F0 eval", len(dataset_entries))
+
     _LOGGER.info("Loading Whisper model: %s (CPU)", args.whisper_model)
     whisper_model = whisper.load_model(args.whisper_model, device="cpu")
 
@@ -303,6 +401,7 @@ def main():
             scales,
             args.sample_rate,
             wav_out_dir,
+            dataset_entries=dataset_entries,
         )
         write_report(report, args.output)
         reports.append(report)
@@ -323,6 +422,8 @@ def main():
                 "mean_utmos": r.mean_utmos,
                 "median_utmos": r.median_utmos,
                 "mean_rtf": r.mean_rtf,
+                "f0_rmse": r.f0_rmse,
+                "f0_corr": r.f0_corr,
                 "num_sentences": len(r.results),
             }
             for r in reports

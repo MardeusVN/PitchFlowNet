@@ -12,18 +12,21 @@ from .transforms import piecewise_rational_quadratic_transform
 
 
 class Snake1d(nn.Module):
-    """Snake activation (BigVGAN): x + (1/alpha) * sin(alpha * x)^2.
+    """SnakeBeta activation (BigVGAN): x + (1/beta) * sin(alpha * x)^2.
 
-    Learnable per-channel alpha gives the activation a periodic inductive
-    bias that suits raw waveform generation better than LeakyReLU.
+    Decoupled alpha (frequency) and beta (magnitude scale) following BigVGAN.
+    Both clamped positive via abs() so the periodic term always adds to x.
     """
 
     def __init__(self, channels: int):
         super().__init__()
         self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+        self.beta = nn.Parameter(torch.ones(1, channels, 1))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return x + (1.0 / (self.alpha + 1e-9)) * torch.sin(self.alpha * x) ** 2
+        alpha = self.alpha.abs().clamp(min=1e-9)
+        beta = self.beta.abs().clamp(min=1e-9)
+        return x + (1.0 / beta) * torch.sin(alpha * x) ** 2
 
 
 class LayerNorm(nn.Module):
@@ -166,6 +169,7 @@ class WN(torch.nn.Module):
         self.in_layers = torch.nn.ModuleList()
         self.res_skip_layers = torch.nn.ModuleList()
         self.drop = nn.Dropout(p_dropout)
+        self.register_buffer('_n_channels', torch.IntTensor([hidden_channels]))
 
         if gin_channels != 0:
             cond_layer = torch.nn.Conv1d(
@@ -198,7 +202,7 @@ class WN(torch.nn.Module):
 
     def forward(self, x, x_mask, g=None, **kwargs):
         output = torch.zeros_like(x)
-        n_channels_tensor = torch.IntTensor([self.hidden_channels])
+        n_channels_tensor = self._n_channels
 
         if g is not None:
             g = self.cond_layer(g)
