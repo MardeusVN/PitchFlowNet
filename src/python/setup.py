@@ -46,6 +46,7 @@ setup(
     entry_points={
         "console_scripts": [
             "piper-train = piper_train.__main__:main",
+            "banhmi-preprocess = banhmi_tts.preprocessing.__main__:main",
         ]
     },
     classifiers=[

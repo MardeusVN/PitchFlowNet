@@ -1,0 +1,7 @@
+# Dependencies for the new Banhmi-TTS preprocessing pipeline.
+# eSpeak-ng is a system dependency and is intentionally not installed by pip.
+numpy>=1.24,<3
+torch>=2.1
+soundfile>=0.12,<1
+soxr>=0.3,<2
+pyworld>=0.3,<1

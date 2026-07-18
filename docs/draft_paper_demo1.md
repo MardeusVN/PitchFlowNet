@@ -4,7 +4,7 @@
 
 ## Abstract
 
-We present **Banhmi-TTS**, a single-speaker text-to-speech system built on the VITS/Piper backbone that investigates whether audio quality can be improved without sacrificing real-time, CPU-only deployability. Starting from the VITS conditional variational autoencoder (Kim et al., 2021), we apply targeted architectural modifications across three independently controlled dimensions: (1) replacing the HiFi-GAN decoder's LeakyReLU activations with BigVGAN's SnakeBeta and adding a Multi-Resolution Discriminator (Lee et al., 2023); (2) augmenting the normalizing-flow coupling layers with transformer-based conditioners, introducing adversarial duration supervision, and stabilizing monotonic alignment search with Gaussian-noise perturbation, following VITS2 (Kong et al., 2023); and (3) conditioning the decoder on explicit per-phoneme log-F0 predictions, following FastPitch (Łańcucki et al., 2021). At inference, the full model is 18 M parameters (25.2 M including the training-only posterior encoder), one to two orders of magnitude smaller than current autoregressive systems. All eight configurations of a full $2^3$ factorial ablation are trained from scratch on LJSpeech (13,100 utterances, ≈ 24 h) and evaluated on held-out speech via WER, UTMOS, and real-time factor. Results are reported in Section 9.
+We present **Banhmi-TTS**, a single-speaker text-to-speech system built on the VITS/Piper backbone that investigates whether audio quality can be improved without sacrificing real-time, CPU-only deployability. Starting from the VITS conditional variational autoencoder (Kim et al., 2021), we apply targeted architectural modifications across three independently controlled dimensions: (1) replacing the HiFi-GAN decoder's LeakyReLU activations with BigVGAN's SnakeBeta and adding a Multi-Resolution Discriminator (Lee et al., 2023); (2) augmenting the normalizing-flow coupling layers with transformer-based conditioners, introducing adversarial duration supervision, and stabilizing monotonic alignment search with Gaussian-noise perturbation, following VITS2 (Kong et al., 2023); and (3) conditioning the decoder on explicit per-phoneme log-F0 predictions, following FastPitch (Łańcucki et al., 2021). At inference, the full model is 18 M parameters (25.2 M including the training-only posterior encoder), one to two orders of magnitude smaller than current autoregressive systems. We compare the complete model with the unmodified VITS/Piper baseline on 100 held-out sentences using WER, UTMOS, and real-time factor. The complete model improves mean UTMOS from 3.550 to 3.619 ($p=0.0056$), while its WER reduction from 8.18% to 7.35% is not statistically significant ($p=0.1821$). Intermediate component combinations remain planned future ablations and are not presented as measured results.
 
 ---
 
@@ -20,9 +20,9 @@ This paper asks whether that quality gap can be narrowed without sacrificing the
 2. The normalizing-flow prior is augmented with VITS2-style transformer coupling layers, the MAS is stabilized with Gaussian-noise perturbation, and the duration model is supplemented with VITS2's adversarial duration discriminator (Kong et al., 2023) (Section 2.3).
 3. The conditioning signal supplied to the decoder is extended with FastPitch-style per-phoneme pitch conditioning (Łańcucki et al., 2021), adapted from a feed-forward decoder to the flow-based VITS decoder (Section 2.4).
 
-Our contribution is empirical rather than architectural: to our knowledge, no published system combines all three source lineages inside a single end-to-end VITS pipeline, and none has been evaluated for single-speaker, low-resource synthesis, where less data is available to stabilize the additional adversarial and flow-based objectives stacked on top of one another. Section 9 reports the ablations needed to show whether this combination composes cleanly in that regime, rather than assuming composability as a foregone conclusion.
+Our contribution is empirical rather than architectural: to our knowledge, no published system combines all three source lineages inside a single end-to-end VITS pipeline, and none has been evaluated for single-speaker, low-resource synthesis, where less data is available to stabilize the additional adversarial and flow-based objectives stacked on top of one another. Section 10 therefore reports a baseline-versus-full-model comparison. Because the intermediate combinations have not yet been trained, the present evidence evaluates the combined system but does not attribute its effect to any individual extension.
 
-The rest of the paper is organized as follows. Section 2 traces each of these components to its source and states precisely what combination has not, to our knowledge, been published before. Section 3 describes the LJSpeech dataset, and Section 4 reports an exploratory analysis of its acoustic and linguistic properties. Section 5 details the data cleaning and preprocessing pipeline. Section 6 presents the resulting Banhmi-TTS methodology, and Section 7 details the model architecture and the factorial ablation design. Section 8 describes the evaluation protocol. Section 9 reports results and ablations, and Section 10 concludes and discusses limitations.
+The rest of the paper is organized as follows. Section 2 traces each component to its source. Sections 3–5 describe the dataset, exploratory analysis, and preprocessing pipeline. Section 6 presents the experimental setup, Section 7 details the model architecture and planned ablation matrix, Section 8 describes training, and Section 9 defines the evaluation protocol. Section 10 reports the baseline-versus-full-model comparison and its limitations.
 
 ---
 
@@ -175,11 +175,11 @@ Following the transcript parsing correction described in Section 5.2, all 13,100
 
 We adopt VITS [1] as the baseline architecture, an end-to-end TTS system that jointly trains acoustic modelling and waveform synthesis within a single conditional variational autoencoder (CVAE). The text encoder produces a prior distribution over the latent space; monotonic alignment search (MAS) estimates soft phoneme-to-frame alignment without an external aligner; a normalizing flow refines the prior; a posterior encoder processes the linear spectrogram to produce a training-time approximate posterior; and a HiFi-GAN-style decoder [2] upsamples the sampled latent to a raw waveform. The adversarial objective is provided by a multi-period discriminator (MPD). All experiments are implemented on the Piper training framework [3] as the implementation foundation.
 
-Section 7.1 introduces the architectural extensions evaluated through a factorial ablation study.
+Section 7.1 introduces the architectural extensions evaluated jointly in the full model. A factorial design for isolating their individual contributions is retained as planned future work (Section 7.6).
 
 ### 6.2. Data Splitting
 
-We train on LJSpeech [8] (13,100 utterances, 23.92 h, 22,050 Hz mono). The corpus is partitioned into three non-overlapping subsets using a reproducible random permutation, with split membership held identical across all eight ablation configurations:
+We train on LJSpeech [8] (13,100 utterances, 23.92 h, 22,050 Hz mono). The corpus is partitioned into three non-overlapping subsets using a reproducible random permutation. The baseline and complete model use identical split membership:
 
 | Split | Count | Purpose |
 |---|---|---|
@@ -199,7 +199,7 @@ This matches the split sizes reported in [1], although utterance membership diff
 
 **Fundamental frequency.** Per-frame F0 contours are extracted using WORLD DIO + StoneMask [11] (frame shift ≈ 11.61 ms). Unvoiced frames carry F0 = 0 by convention (DIO output); these are linearly interpolated in the log domain before caching. The contour is then truncated or edge-padded to match the spectrogram frame count (`pyworld` consistently returns one extra frame at our hop length). F0 features are consumed only by configurations with `use_f0 = true`.
 
-**Waveform segments.** Random 8,192-sample segments (approximately 0.37 s at 22,050 Hz, corresponding to 32 latent frames) are extracted per utterance and passed to the generator and discriminators during windowed generator training (Kim et al., 2021). Segment size is fixed across all configurations.
+**Waveform segments.** Random 8,192-sample segments (approximately 0.37 s at 22,050 Hz, corresponding to 32 latent frames) are extracted per utterance and passed to the generator and discriminators during windowed generator training (Kim et al., 2021). Segment size is fixed for Config A and Config H.
 
 ---
 
@@ -241,9 +241,9 @@ $$\tau = \max\!\left(0,\ 0.01 - t \times 2 \times 10^{-6}\right)$$
 
 decays linearly with global training step $t$, reaching zero at step 5,000 (approximately epoch 13). This schedule transitions MAS from soft alignment exploration in early training to hard Viterbi alignment later, following [7].
 
-### 7.6. Ablation Configurations
+### 7.6. Planned Ablation Configurations
 
-The three flags define a full $2^3$ factorial: eight configurations covering all combinations of the three research directions.
+The three flags define a possible full $2^3$ factorial with eight configurations. In the present study, only Config A (baseline) and Config H (complete model) have been trained and evaluated. Configurations B–G are listed to document the planned ablation design; they are not treated as completed experiments or used to attribute gains to individual components.
 
 | Config | `use_bigvgan` | `use_vits2` | `use_f0` |
 |---|:---:|:---:|:---:|
@@ -256,7 +256,7 @@ The three flags define a full $2^3$ factorial: eight configurations covering all
 | G | ✗ | ✓ | ✓ |
 | H | ✓ | ✓ | ✓ |
 
-All configurations share identical model dimensions, optimiser settings, and training budget. Config A serves as the common reference for all comparisons.
+For a future controlled ablation, all configurations should share identical model dimensions, optimiser settings, data splits, random seeds, and training budgets. The reported comparison in this paper is limited to Config A versus Config H.
 
 ---
 
@@ -264,7 +264,7 @@ All configurations share identical model dimensions, optimiser settings, and tra
 
 ### 8.1. Optimiser
 
-Generator and discriminators are each optimised with AdamW ($\text{lr} = 2 \times 10^{-4}$, $\beta_1 = 0.8$, $\beta_2 = 0.99$, $\varepsilon = 10^{-9}$, weight decay $\lambda = 0.01$), following Kim et al. (2021). Gradient norms are clipped to 1.0 for both generator and discriminators. Both schedulers follow an exponential decay ($\gamma = 0.999875 = 0.999^{1/8}$) stepped once per epoch, matching the schedule in Kim et al. (2021); at epoch 1,100 the learning rate is approximately 87% of its initial value.
+Generator and discriminators are each optimised with AdamW ($\text{lr} = 2 \times 10^{-4}$, $\beta_1 = 0.8$, $\beta_2 = 0.99$, $\varepsilon = 10^{-9}$), following Kim et al. (2021). Gradient norms are clipped to 1.0 for both generator and discriminators. Both schedulers follow an exponential decay ($\gamma = 0.999875 = 0.999^{1/8}$) stepped once per epoch, matching the schedule in Kim et al. (2021); at epoch 1,100 the learning rate is approximately 87% of its initial value.
 
 ### 8.2. GAN Training Procedure
 
@@ -280,7 +280,7 @@ Due to a cuFFT limitation, STFT computations within MRD and mel loss are cast to
 
 ### 8.3. Hardware and Schedule
 
-All runs use 2 × NVIDIA RTX 4070 Ti (12 GB each), DDP (NCCL), bfloat16 mixed precision, batch size 16 per GPU (32 total), global RNG seed 1234 (independent from the dedicated data-split generator described in Section 6.2), trained from scratch for 1,100 epochs with checkpoints saved every epoch. For comparison, the original VITS used 4 × NVIDIA V100, batch 64 per GPU (256 total), trained for 800,000 steps. Our training budget of approximately 430,000 steps is thus roughly half that of the original, which we regard as a practical constraint rather than an experimental variable.
+Config A and Config H use 2 × NVIDIA RTX 4070 Ti (12 GB each), DDP (NCCL), bfloat16 mixed precision, batch size 16 per GPU (32 total), and global RNG seed 1234 (independent from the dedicated data-split generator described in Section 6.2). The selected checkpoints are epoch 861 for Config A and epoch 863 for Config H, chosen by validation mel loss. Checkpoints are saved every epoch.
 
 ---
 
@@ -288,29 +288,44 @@ All runs use 2 × NVIDIA RTX 4070 Ti (12 GB each), DDP (NCCL), bfloat16 mixed pr
 
 ### 9.1. Evaluation Metrics
 
-All configurations are evaluated post-training on the 500-sample held-out test set via an automated harness that synthesises audio from raw text (no ground-truth audio is used) and scores the result using three core metrics applicable across all eight configurations, plus a fourth metric specific to F0-conditioned configurations (D, F, G, H).
+Config A and Config H are evaluated post-training on the same 100 held-out sentences via an automated harness that synthesises audio from raw text (no ground-truth audio is used for WER, UTMOS, or RTF scoring). The present comparison reports three metrics: WER, UTMOS, and RTF.
 
 **Word Error Rate (WER).** Synthesised audio is transcribed by Whisper [13] and compared against the reference transcript using `jiwer`. Both hypothesis and reference are normalised identically before scoring: lowercased, then all characters outside `[a-z0-9' ]` removed, and whitespace collapsed.
 
-**UTMOS.** Synthesised audio is scored using UTMOSv2, a pretrained neural MOS predictor. It serves as a perceptual naturalness proxy on a 1–5 scale where higher values indicate better quality, enabling large-scale comparison across ablation configurations without requiring crowdsourced listener studies.
+**UTMOS.** Synthesised audio is scored using UTMOSv2, a pretrained neural MOS predictor. It serves as an automated perceptual-naturalness proxy on a 1–5 scale where higher values indicate better predicted quality. UTMOS is not a substitute for a human MOS listening study.
 
-**Real-Time Factor (RTF).** Inference wall-clock time divided by audio duration, measured on CPU. RTF is reported as a mean over all 500 utterances and quantifies deployment cost, where lower values are better.
+**Real-Time Factor (RTF).** Inference wall-clock time divided by audio duration. RTF is reported as a mean over the same 100 sentences and quantifies synthesis cost, where lower values are better.
 
-**F0 RMSE and F0 Correlation.** F0 RMSE (Root Mean Square Error) in the log-F0 domain and F0 Correlation (Pearson correlation between predicted and ground-truth log-F0 sequences) measure pitch contour accuracy independent of absolute offset. For configurations with `use_f0 = true` (D, F, G, H), predicted per-phoneme log-F0 is evaluated against ground-truth F0. Both metrics are computed on the same 500-sample test set, aggregated across all phonemes rather than per-sentence, since individual sentences may contain too few voiced phonemes for a stable per-sentence estimate.
+**Planned F0 analysis.** The evaluation harness supports log-F0 RMSE and Pearson correlation between predicted and ground-truth log-F0. These values were not produced by the completed A–H evaluation and are therefore not reported. They should be included when the F0-enabled planned configurations D, F, G, and H are evaluated under a common protocol.
 
-Statistical significance between any two configurations is assessed via a paired Wilcoxon signed-rank test on the 500 per-sentence WER and UTMOS score distributions ($p < 0.05$).
+Statistical significance between Config A and Config H is assessed via a paired Wilcoxon signed-rank test on the 100 paired per-sentence WER and UTMOS score distributions ($p < 0.05$).
 
 ### 9.2. Hyperparameter Tuning
 
-Optimiser hyperparameters ($\text{lr}$, $\beta_1$, $\beta_2$, $\varepsilon$, $\gamma$, $\lambda$, $c_\text{mel}$, $c_\text{kl}$) are adopted directly from [1] and held fixed across all configurations; modifying them per configuration would confound architectural attribution.
+Optimiser hyperparameters ($\text{lr}$, $\beta_1$, $\beta_2$, $\varepsilon$, $\gamma$, $\lambda$, $c_\text{mel}$, $c_\text{kl}$) are adopted directly from [1] and held fixed between Config A and Config H. They should likewise remain fixed when the planned B–G experiments are conducted.
 
-Architecture selection is performed through the factorial ablation design (Section 7.6) rather than a hyperparameter search. The final Banhmi-TTS architecture is selected as the configuration achieving the lowest WER among those showing no statistically significant UTMOS degradation relative to the baseline, per the Wilcoxon test described in Section 9.1.
+No architecture selection claim is made from the planned factorial design because configurations B–G have not been evaluated. The present experiment tests only whether the complete architecture differs from the baseline; it cannot identify which component causes any observed difference.
 
 ---
 
-## 10. Results
+## 10. Baseline versus Full-Model Comparison
 
-*(To be completed after all eight ablation configurations finish training.)*
+### 10.1. Quantitative Results
+
+Both systems were evaluated on the same 100 sentences. Config H obtains a lower mean WER and higher mean UTMOS than Config A, with a modest increase in mean RTF.
+
+| Configuration | Mean WER ↓ | Median WER ↓ | Mean UTMOS ↑ | Median UTMOS ↑ | Mean RTF ↓ |
+|---|---:|---:|---:|---:|---:|
+| A — VITS/Piper baseline | 0.0818 | 0.0541 | 3.5497 | 3.5533 | 0.0658 |
+| H — complete model | 0.0735 | 0.0000 | 3.6193 | 3.6493 | 0.0721 |
+
+The paired Wilcoxon test does not establish a statistically significant WER difference ($W=278.5$, $p=0.1821$). The UTMOS distributions differ significantly ($W=1719.0$, $p=0.0056$), favouring Config H. Accordingly, the results support an improvement in predicted naturalness under UTMOSv2, but they do not establish an intelligibility improvement at the 0.05 significance level. Mean RTF increases from 0.0658 to 0.0721 (approximately 9.6%), although both measurements remain below 1.0 in the recorded evaluation environment.
+
+### 10.2. Discussion and Limitations
+
+The comparison evaluates the architectural package as a whole. Because configurations B–G were not trained, the observed UTMOS improvement cannot be assigned separately to the BigVGAN-style decoder/discriminator changes, VITS2-style flow and alignment changes, or explicit F0 conditioning. Describing the experiment as a completed factorial ablation would therefore overstate the evidence.
+
+The evaluation also has three scope limitations. First, it uses 100 sentences rather than the originally planned 500-sample test set. Second, UTMOS is an automated predictor and does not replace a blinded human MOS study. Third, F0 RMSE and correlation were not emitted by the completed evaluation, so no claim is made about pitch-prediction accuracy. The planned B–G configurations and F0-specific evaluation are deferred to future work using the matrix in Section 7.6.
 
 ---
 

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-07-14T00:00:00.000Z" agent="Codex" version="24.7.17" type="device">
+  <diagram id="model-architecture" name="Model Architecture">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="1" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="Proposed VITS-based Text-to-Speech Architecture" style="text;html=1;align=center;verticalAlign=middle;fontSize=24;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="350" y="20" width="900" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Baseline components and optional BigVGAN, VITS2, and F0 extensions" style="text;html=1;align=center;verticalAlign=middle;fontSize=13;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="470" y="60" width="660" height="25" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="genGroup" value="GENERATOR / SYNTHESIZER (SynthesizerTrn)" style="swimlane;html=1;rounded=1;startSize=32;horizontal=1;fontStyle=1;fontSize=15;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="160" y="110" width="1270" height="520" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="textInput" value="Phoneme / Text Sequence" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="genGroup">
+          <mxGeometry x="30" y="85" width="145" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="textEncoder" value="&lt;b&gt;Text Encoder&lt;/b&gt;&lt;br&gt;Relative-position Transformer&lt;br&gt;hidden 192 · filter 768&lt;br&gt;6 layers · 2 heads · kernel 3&lt;br&gt;dropout 0.1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="genGroup">
+          <mxGeometry x="215" y="55" width="210" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="prior" value="&lt;b&gt;Prior Distribution&lt;/b&gt;&lt;br&gt;μ&lt;sub&gt;p&lt;/sub&gt;, log σ&lt;sub&gt;p&lt;/sub&gt;&lt;br&gt;+ hidden state x" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="genGroup">
+          <mxGeometry x="465" y="65" width="155" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="speakerSlot" value="Speaker embedding slot&lt;br&gt;&lt;font color=&quot;#777777&quot;&gt;inactive (single speaker)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="genGroup">
+          <mxGeometry x="225" y="190" width="190" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="specInput" value="Linear Spectrogram&lt;br&gt;&lt;font color=&quot;#777777&quot;&gt;training only&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#ffffff;strokeColor=#9673a6;" vertex="1" parent="genGroup">
+          <mxGeometry x="30" y="335" width="145" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="postEncoder" value="&lt;b&gt;Posterior Encoder&lt;/b&gt;&lt;br&gt;Dilated WaveNet&lt;br&gt;hidden 192 · kernel 5&lt;br&gt;16 layers · dilation 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="genGroup">
+          <mxGeometry x="215" y="310" width="210" height="105" as="geometry"/>
+        </mxCell>
+        <mxCell id="posterior" value="&lt;b&gt;Approx. Posterior&lt;/b&gt;&lt;br&gt;μ&lt;sub&gt;q&lt;/sub&gt;, log σ&lt;sub&gt;q&lt;/sub&gt;&lt;br&gt;sample z" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="genGroup">
+          <mxGeometry x="465" y="320" width="155" height="85" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="mas" value="&lt;b&gt;Monotonic Alignment Search (MAS)&lt;/b&gt;&lt;br&gt;Prior ↔ posterior alignment&lt;br&gt;&lt;font color=&quot;#9673a6&quot;&gt;VITS2: adaptive Gaussian noise (training)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="genGroup">
+          <mxGeometry x="465" y="200" width="235" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="sdp" value="&lt;b&gt;Stochastic Duration Predictor&lt;/b&gt;&lt;br&gt;4-flow normalizing flow&lt;br&gt;DDSConv: kernel 3, 3 layers, filter 192" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="genGroup">
+          <mxGeometry x="735" y="55" width="225" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="duration" value="Phoneme&lt;br&gt;durations" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;" vertex="1" parent="genGroup">
+          <mxGeometry x="995" y="70" width="105" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="flow" value="&lt;b&gt;Normalizing Flow&lt;/b&gt;&lt;br&gt;ResidualCouplingBlock&lt;br&gt;4 coupling layers · kernel 5&lt;br&gt;4 WaveNet layers/coupler&lt;br&gt;&lt;font color=&quot;#9673a6&quot;&gt;VITS2: + self-attention&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="genGroup">
+          <mxGeometry x="670" y="305" width="220" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="latent" value="Aligned Latent&lt;br&gt;z / z&lt;sub&gt;p&lt;/sub&gt;" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="genGroup">
+          <mxGeometry x="925" y="325" width="110" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="f0pred" value="&lt;b&gt;F0 Predictor (optional)&lt;/b&gt;&lt;br&gt;2 × Conv1d · hidden 256&lt;br&gt;kernel 3 · dropout 0.5&lt;br&gt;per-phoneme log-F0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="genGroup">
+          <mxGeometry x="735" y="180" width="225" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="f0cond" value="f0_cond Conv1d&lt;br&gt;zero-initialized&lt;br&gt;additive conditioning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="genGroup">
+          <mxGeometry x="995" y="190" width="145" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="decoder" value="&lt;b&gt;HiFi-GAN Decoder&lt;/b&gt;&lt;br&gt;Upsampling 8 × 8 × 4&lt;br&gt;initial channels 256&lt;br&gt;MRF ResBlock2: kernels 3, 5, 7&lt;br&gt;dilations (1,2), (2,6), (3,12)&lt;br&gt;&lt;font color=&quot;#b85450&quot;&gt;BigVGAN: SnakeBeta activations&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="genGroup">
+          <mxGeometry x="1080" y="305" width="175" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="audio" value="Generated&lt;br&gt;Waveform" style="shape=mxgraph.basic.wave;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="genGroup">
+          <mxGeometry x="1100" y="455" width="140" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="discGroup" value="ADVERSARIAL TRAINING (discarded at inference)" style="swimlane;html=1;rounded=1;startSize=32;horizontal=1;fontStyle=1;fontSize=15;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="160" y="660" width="1270" height="275" as="geometry"/>
+        </mxCell>
+        <mxCell id="realAudio" value="Real Waveform" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="discGroup">
+          <mxGeometry x="30" y="85" width="130" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="mpd" value="&lt;b&gt;Multi-Period Discriminator (MPD)&lt;/b&gt;&lt;br&gt;DiscriminatorS: 6 × Conv1d&lt;br&gt;5 × DiscriminatorP: periods [2,3,5,7,11]&lt;br&gt;5 × Conv2d each · 46.7 M parameters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="discGroup">
+          <mxGeometry x="210" y="55" width="290" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="mrd" value="&lt;b&gt;Multi-Resolution Discriminator&lt;/b&gt; &lt;font color=&quot;#b85450&quot;&gt;(BigVGAN)&lt;/font&gt;&lt;br&gt;3 × DiscriminatorR on STFT magnitudes&lt;br&gt;(512/50/240), (1024/120/600),&lt;br&gt;(2048/240/1200) · 280 K parameters" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="discGroup">
+          <mxGeometry x="545" y="55" width="295" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="durDisc" value="&lt;b&gt;Duration Discriminator&lt;/b&gt; &lt;font color=&quot;#9673a6&quot;&gt;(VITS2)&lt;/font&gt;&lt;br&gt;5 × Conv1d · hidden 192 · kernel 3&lt;br&gt;real/fake log-duration conditioned on x" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="discGroup">
+          <mxGeometry x="885" y="55" width="270" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="losses" value="Adversarial + Feature Matching + Duration losses" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="discGroup">
+          <mxGeometry x="455" y="195" width="445" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="legend" value="&lt;b&gt;Legend:&lt;/b&gt; ①–⑨ = main training/synthesis order · ⑤a–⑤d = alignment/duration substeps · F1–F3 = optional F0 path · T1–T4 = adversarial training · Dashed = training-only/inactive" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="240" y="965" width="1110" height="45" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" value="① Encode text" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="genGroup" source="textInput" target="textEncoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="② Prior" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.35;entryX=0;entryY=0.35;" edge="1" parent="genGroup" source="textEncoder" target="prior"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;" edge="1" parent="genGroup" source="speakerSlot" target="textEncoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="③ Encode acoustic features" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="genGroup" source="specInput" target="postEncoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="④ Posterior" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="genGroup" source="postEncoder" target="posterior"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="⑥ Transform z" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.65;entryX=0;entryY=0.65;" edge="1" parent="genGroup" source="posterior" target="flow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="⑦ Aligned zₚ" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.65;entryX=0;entryY=0.65;" edge="1" parent="genGroup" source="flow" target="latent"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" value="⑧ Decode" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.6;" edge="1" parent="genGroup" source="latent" target="decoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" value="⑨ Waveform" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="genGroup" source="decoder" target="audio"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" value="⑤a Prior scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.35;entryY=0;" edge="1" parent="genGroup" source="prior" target="mas"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="⑤b Posterior scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=0;entryX=0.35;entryY=1;" edge="1" parent="genGroup" source="posterior" target="mas"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="⑤c Alignment" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=1;exitY=0.25;entryX=0;entryY=0.8;" edge="1" parent="genGroup" source="mas" target="sdp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" value="⑤d Durations" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=1;exitY=0.35;entryX=0;entryY=0.35;" edge="1" parent="genGroup" source="sdp" target="duration"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" value="x conditioning" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.7;exitY=0;entryX=0.15;entryY=0;" edge="1" parent="genGroup" source="textEncoder" target="sdp"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="360" y="40"/><mxPoint x="770" y="40"/></Array></mxGeometry></mxCell>
+        <mxCell id="e15" value="F1 · Predict F0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;endArrow=block;labelBackgroundColor=#ffffff;exitX=1;exitY=0.8;entryX=0;entryY=0.45;" edge="1" parent="genGroup" source="textEncoder" target="f0pred"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="650" y="150"/><mxPoint x="650" y="220"/></Array></mxGeometry></mxCell>
+        <mxCell id="e16" value="F2 · Project" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;endArrow=block;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="genGroup" source="f0pred" target="f0cond"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" value="F3 · Condition" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;endArrow=block;labelBackgroundColor=#ffffff;exitX=1;exitY=0.7;entryX=0.5;entryY=0;" edge="1" parent="genGroup" source="f0cond" target="decoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e18" value="T1 · Generated audio" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="audio" target="mpd"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e19" value="T1 · Real audio" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;fontStyle=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="discGroup" source="realAudio" target="mpd"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e20" value="T2 · STFT views" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;dashed=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0;entryY=0.8;" edge="1" parent="discGroup" source="realAudio" target="mrd"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="95" y="180"/><mxPoint x="525" y="180"/></Array></mxGeometry></mxCell>
+        <mxCell id="e21" value="T3 · Scores/features" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.2;entryY=0;" edge="1" parent="discGroup" source="mpd" target="losses"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e22" value="T3 · MRD scores" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.55;entryY=0;" edge="1" parent="discGroup" source="mrd" target="losses"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e23" value="T4 · Duration score" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;labelBackgroundColor=#ffffff;exitX=0.5;exitY=1;entryX=0.85;entryY=0;" edge="1" parent="discGroup" source="durDisc" target="losses"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
