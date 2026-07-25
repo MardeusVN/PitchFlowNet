@@ -61,7 +61,7 @@ class VitsModel(pl.LightningModule):
         use_spectral_norm: bool = False,
         gin_channels: int = 0,
         use_sdp: bool = True,
-        use_bigvgan: bool = False,   # Snake1d activation + MRD discriminator
+        use_bigvgan: bool = False,   # SnakeBeta activation + MRD discriminator
         use_vits2: bool = False,     # transformer coupling flows + duration discriminator + noised MAS
         use_f0: bool = False,        # F0 predictor + decoder conditioning
         segment_size: int = 8192,
@@ -515,7 +515,7 @@ class VitsModel(pl.LightningModule):
                             help="Max gradient norm for clipping (None = disabled)")
         # Three high-level architecture flags (default=False = vanilla VITS baseline)
         parser.add_argument("--use-bigvgan", type=lambda x: x.lower() != "false", default=False,
-                            help="Enable BigVGAN components: Snake1d activation + MRD discriminator")
+                            help="Enable BigVGAN components: SnakeBeta activation + MRD discriminator")
         parser.add_argument("--use-vits2", type=lambda x: x.lower() != "false", default=False,
                             help="Enable VITS2 components: transformer flows + duration discriminator + noised MAS")
         parser.add_argument("--use-f0", type=lambda x: x.lower() != "false", default=False,

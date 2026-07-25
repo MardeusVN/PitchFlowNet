@@ -465,7 +465,7 @@ class Generator(torch.nn.Module):
         for i, (u, k) in enumerate(zip(upsample_rates, upsample_kernel_sizes)):
             if use_snake:
                 self.pre_up_snakes.append(
-                    modules.Snake1d(upsample_initial_channel // (2**i))
+                    modules.SnakeBeta(upsample_initial_channel // (2**i))
                 )
             self.ups.append(
                 weight_norm(
@@ -485,10 +485,10 @@ class Generator(torch.nn.Module):
             for j, (k, d) in enumerate(
                 zip(resblock_kernel_sizes, resblock_dilation_sizes)
             ):
-                self.resblocks.append(resblock_module(ch, k, d))
+                self.resblocks.append(resblock_module(ch, k, d, use_snake=use_snake))
 
         if use_snake:
-            self.final_snake = modules.Snake1d(ch)
+            self.final_snake = modules.SnakeBeta(ch)
         self.conv_post = Conv1d(ch, 1, 7, 1, padding=3, bias=False)
         self.ups.apply(init_weights)
 

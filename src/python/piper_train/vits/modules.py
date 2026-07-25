@@ -10,8 +10,10 @@ from torch.nn.utils import remove_weight_norm, weight_norm
 from .commons import fused_add_tanh_sigmoid_multiply, get_padding, init_weights
 from .transforms import piecewise_rational_quadratic_transform
 
+_LRELU_SLOPE = 0.1
 
-class Snake1d(nn.Module):
+
+class SnakeBeta(nn.Module):
     """SnakeBeta activation (BigVGAN): x + (1/beta) * sin(alpha * x)^2.
 
     Decoupled alpha (frequency) and beta (magnitude scale) following BigVGAN.
@@ -242,10 +244,13 @@ class ResBlock1(torch.nn.Module):
         channels: int,
         kernel_size: int = 3,
         dilation: typing.Tuple[int] = (1, 3, 5),
+        use_snake: bool = True,
     ):
         super(ResBlock1, self).__init__()
-        self.snakes1 = nn.ModuleList([Snake1d(channels) for _ in range(3)])
-        self.snakes2 = nn.ModuleList([Snake1d(channels) for _ in range(3)])
+        self.use_snake = use_snake
+        if use_snake:
+            self.snakes1 = nn.ModuleList([SnakeBeta(channels) for _ in range(3)])
+            self.snakes2 = nn.ModuleList([SnakeBeta(channels) for _ in range(3)])
         self.convs1 = nn.ModuleList(
             [
                 weight_norm(
@@ -319,14 +324,12 @@ class ResBlock1(torch.nn.Module):
         self.convs2.apply(init_weights)
 
     def forward(self, x, x_mask=None):
-        for snake1, c1, snake2, c2 in zip(
-            self.snakes1, self.convs1, self.snakes2, self.convs2
-        ):
-            xt = snake1(x)
+        for i, (c1, c2) in enumerate(zip(self.convs1, self.convs2)):
+            xt = self.snakes1[i](x) if self.use_snake else F.leaky_relu(x, _LRELU_SLOPE)
             if x_mask is not None:
                 xt = xt * x_mask
             xt = c1(xt)
-            xt = snake2(xt)
+            xt = self.snakes2[i](xt) if self.use_snake else F.leaky_relu(xt, _LRELU_SLOPE)
             if x_mask is not None:
                 xt = xt * x_mask
             xt = c2(xt)
@@ -344,10 +347,16 @@ class ResBlock1(torch.nn.Module):
 
 class ResBlock2(torch.nn.Module):
     def __init__(
-        self, channels: int, kernel_size: int = 3, dilation: typing.Tuple[int] = (1, 3)
+        self,
+        channels: int,
+        kernel_size: int = 3,
+        dilation: typing.Tuple[int] = (1, 3),
+        use_snake: bool = True,
     ):
         super(ResBlock2, self).__init__()
-        self.snakes = nn.ModuleList([Snake1d(channels) for _ in range(2)])
+        self.use_snake = use_snake
+        if use_snake:
+            self.snakes = nn.ModuleList([SnakeBeta(channels) for _ in range(2)])
         self.convs = nn.ModuleList(
             [
                 weight_norm(
@@ -375,8 +384,8 @@ class ResBlock2(torch.nn.Module):
         self.convs.apply(init_weights)
 
     def forward(self, x, x_mask=None):
-        for snake, c in zip(self.snakes, self.convs):
-            xt = snake(x)
+        for i, c in enumerate(self.convs):
+            xt = self.snakes[i](x) if self.use_snake else F.leaky_relu(x, _LRELU_SLOPE)
             if x_mask is not None:
                 xt = xt * x_mask
             xt = c(xt)

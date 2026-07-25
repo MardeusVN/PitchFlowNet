@@ -20,8 +20,14 @@ htmlcov
 
 .venv/
 lightning_logs/
-.claude/*
 
+# Claude Code workspace — local AI tooling, not part of the project
+.claude/
+
+# Paper drafts and committee documents — private research notes
+docs/Paper/
+
+# Evaluation outputs
 eval_100samples/
 eval_baseline_vs_piper_modern/
 *.wav
