@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 710" width="900" height="710" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2c5aa0"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="710" fill="#ffffff"/>
+
+  <!-- Row1: Batch -->
+  <rect x="70" y="40" width="520" height="56" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="63" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14304f">Batch t</text>
+  <text x="330" y="82" text-anchor="middle" font-size="12" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">16 utt./GPU x 2 GPUs = 32 total, bf16 mixed precision</text>
+
+  <line x1="330" y1="96" x2="330" y2="118" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row2: Generator forward -->
+  <rect x="70" y="118" width="520" height="80" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="142" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14304f">Generator Forward — SynthesizerTrn</text>
+  <text x="330" y="163" text-anchor="middle" font-size="11.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">produces y-hat, z, (m_p, sigma_p), (m_q, sigma_q),</text>
+  <text x="330" y="180" text-anchor="middle" font-size="11.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">predicted durations, [predicted F0]</text>
+
+  <line x1="330" y1="198" x2="330" y2="218" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <line x1="590" y1="208" x2="628" y2="208" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <rect x="630" y="180" width="240" height="56" rx="6" fill="#fff9e6" stroke="#b8860b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="750" y="200" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6b5210">Generator-first order</text>
+  <text x="750" y="216" text-anchor="middle" font-size="10.5" fill="#6b5210">deviates from VITS's</text>
+  <text x="750" y="230" text-anchor="middle" font-size="10.5" fill="#6b5210">discriminator-first convention</text>
+
+  <!-- Row3: Generator backward -->
+  <rect x="70" y="220" width="520" height="250" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="2"/>
+  <text x="90" y="244" font-size="14.5" font-weight="700" fill="#14304f">Generator Backward — minimize L_gen</text>
+  <rect x="536" y="230" width="44" height="20" rx="10" fill="#2c5aa0"/>
+  <text x="558" y="244" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">1st</text>
+
+  <!-- chips row1 -->
+  <rect x="85" y="260" width="235" height="42" rx="5" fill="#f7f9fb" stroke="#c7d2dc"/>
+  <text x="99" y="277" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#14304f">L_adv,MPD</text>
+  <text x="99" y="294" font-size="10" fill="#5b6b7c">always</text>
+
+  <rect x="340" y="260" width="235" height="42" rx="5" fill="#f7f9fb" stroke="#c7d2dc"/>
+  <text x="354" y="277" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#14304f">L_fm</text>
+  <text x="354" y="294" font-size="10" fill="#5b6b7c">always — feature-map matching</text>
+
+  <!-- chips row2 -->
+  <rect x="85" y="310" width="235" height="42" rx="5" fill="#f7f9fb" stroke="#c7d2dc"/>
+  <text x="99" y="327" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#14304f">c_mel . L_mel</text>
+  <text x="99" y="344" font-size="10" fill="#5b6b7c">always — fp32 STFT (cuFFT)</text>
+
+  <rect x="340" y="310" width="235" height="42" rx="5" fill="#f7f9fb" stroke="#c7d2dc"/>
+  <text x="354" y="327" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#14304f">L_dur</text>
+  <text x="354" y="344" font-size="10" fill="#5b6b7c">always — SDP neg. log-likelihood</text>
+
+  <!-- chips row3 -->
+  <rect x="85" y="360" width="235" height="42" rx="5" fill="#f7f9fb" stroke="#c7d2dc"/>
+  <text x="99" y="377" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#14304f">c_kl . L_kl</text>
+  <text x="99" y="394" font-size="10" fill="#5b6b7c">always — posterior-prior KL</text>
+
+  <rect x="340" y="360" width="235" height="42" rx="5" fill="#eafaf6" stroke="#0f7a72"/>
+  <text x="354" y="377" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#0b4a44">L_adv,MRD</text>
+  <text x="354" y="394" font-size="10" fill="#0f6b62">BigVGAN only</text>
+
+  <!-- chips row4 -->
+  <rect x="85" y="410" width="235" height="42" rx="5" fill="#eafaf6" stroke="#0f7a72"/>
+  <text x="99" y="427" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#0b4a44">L_dur_gen</text>
+  <text x="99" y="444" font-size="10" fill="#0f6b62">VITS2 only — adv. duration disc.</text>
+
+  <rect x="340" y="410" width="235" height="42" rx="5" fill="#eafaf6" stroke="#0f7a72"/>
+  <text x="354" y="427" font-size="11.5" font-family="Consolas, 'Cascadia Code', monospace" fill="#0b4a44">L_f0</text>
+  <text x="354" y="444" font-size="10" fill="#0f6b62">F0 only</text>
+
+  <line x1="330" y1="470" x2="330" y2="494" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row4: Discriminator forward -->
+  <rect x="70" y="494" width="520" height="70" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="518" text-anchor="middle" font-size="14.5" font-weight="700" fill="#14304f">Discriminator Forward</text>
+  <text x="330" y="538" text-anchor="middle" font-size="11.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">MPD [+ MRD] [+ DurDisc] score real y vs. y-hat.detach()</text>
+  <text x="330" y="554" text-anchor="middle" font-size="10.5" fill="#5b6b7c">brackets = active only when the corresponding module is enabled</text>
+
+  <line x1="330" y1="564" x2="330" y2="586" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row5: Discriminator backward -->
+  <rect x="70" y="586" width="520" height="90" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="2"/>
+  <text x="90" y="611" font-size="14.5" font-weight="700" fill="#14304f">Discriminator Backward — minimize L_D</text>
+  <rect x="536" y="596" width="44" height="20" rx="10" fill="#2c5aa0"/>
+  <text x="558" y="610" text-anchor="middle" font-size="11" font-weight="700" fill="#ffffff">2nd</text>
+  <text x="330" y="636" text-anchor="middle" font-size="11.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">LSGAN: E[(1-D(y))^2] + E[D(y-hat)^2]</text>
+  <text x="330" y="654" text-anchor="middle" font-size="10.5" fill="#5b6b7c">applied independently per discriminator (MPD, MRD, DurDisc)</text>
+
+  <!-- loop back -->
+  <path d="M590,631 H860 V68 H590" fill="none" stroke="#2c5aa0" stroke-width="2" stroke-dasharray="1,0" marker-end="url(#arrow)"/>
+  <text x="875" y="350" text-anchor="middle" font-size="12" font-style="italic" fill="#5b6b7c" transform="rotate(90 875 350)">next batch, t -&gt; t+1</text>
+</svg>

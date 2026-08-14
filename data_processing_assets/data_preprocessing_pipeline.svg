@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 900" width="900" height="900" font-family="'Segoe UI', Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2c5aa0"/>
+    </marker>
+    <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#5b8ac9"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="900" fill="#ffffff"/>
+
+  <!-- A: Raw corpus -->
+  <rect x="70" y="40" width="520" height="64" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="62" text-anchor="middle" font-size="15" font-weight="700" fill="#14304f">Raw LJSpeech Corpus</text>
+  <text x="330" y="82" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">13,100 WAV files, 22,050 Hz mono</text>
+  <text x="330" y="98" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">metadata.csv (pipe-delimited, 3 fields)</text>
+
+  <line x1="330" y1="104" x2="330" y2="128" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- B: Validity + parsing -->
+  <rect x="70" y="130" width="520" height="96" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="152" text-anchor="middle" font-size="15" font-weight="700" fill="#14304f">Validity Check &amp; Transcript Parsing</text>
+  <text x="330" y="174" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">Verify all 13,100 audio files present, non-empty</text>
+  <text x="330" y="192" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">Parse metadata.csv, then phonemize via espeak-ng</text>
+  <text x="330" y="212" text-anchor="middle" font-size="11.5" fill="#5b6b7c">(third field only — normalized transcription)</text>
+
+  <line x1="590" y1="178" x2="628" y2="178" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <rect x="630" y="130" width="240" height="96" rx="6" fill="#fff9e6" stroke="#b8860b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="750" y="150" text-anchor="middle" font-size="12.5" font-weight="700" fill="#6b5210">CSV quoting mode</text>
+  <text x="644" y="169" font-size="11" fill="#6b5210">QUOTE_MINIMAL (default):</text>
+  <text x="650" y="184" font-size="11" fill="#6b5210">1,052 unescaped " chars</text>
+  <text x="650" y="198" font-size="11" fill="#6b5210">corrupt 16 rows</text>
+  <text x="644" y="216" font-size="11" font-weight="700" fill="#6b5210">QUOTE_NONE (used): 13,100 intact</text>
+
+  <line x1="330" y1="226" x2="330" y2="250" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- C: Outlier filtering -->
+  <rect x="70" y="252" width="520" height="80" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="274" text-anchor="middle" font-size="15" font-weight="700" fill="#14304f">Outlier Filtering — Tukey Fence</text>
+  <text x="330" y="296" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">1.5x IQR on speaking rate (chars/s)</text>
+  <text x="330" y="314" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">203 utterances flagged (1.55%)</text>
+
+  <line x1="590" y1="292" x2="628" y2="292" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <rect x="630" y="252" width="240" height="80" rx="6" fill="#fff9e6" stroke="#b8860b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="750" y="274" text-anchor="middle" font-size="12" font-weight="700" fill="#6b5210">Flagged only</text>
+  <text x="750" y="292" text-anchor="middle" font-size="11" fill="#6b5210">not excluded from the run —</text>
+  <text x="750" y="307" text-anchor="middle" font-size="11" fill="#6b5210">all 13,100 retained downstream</text>
+
+  <line x1="330" y1="332" x2="330" y2="356" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- D: Silence removal / resample / normalize -->
+  <rect x="70" y="358" width="520" height="92" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="380" text-anchor="middle" font-size="15" font-weight="700" fill="#14304f">Silence Removal, Resample, Normalize</text>
+  <text x="330" y="402" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">Silero VAD @ 16 kHz — frame 30 ms, threshold 0.2</text>
+  <text x="330" y="420" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">Resample to 22,050 Hz; normalize to [-1, 1]</text>
+
+  <!-- fork -->
+  <line x1="330" y1="450" x2="330" y2="460" stroke="#2c5aa0" stroke-width="2"/>
+  <line x1="330" y1="460" x2="195" y2="476" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="330" y1="460" x2="465" y2="476" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- E1: Spectrogram -->
+  <rect x="70" y="478" width="250" height="110" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="195" y="500" text-anchor="middle" font-size="14" font-weight="700" fill="#14304f">Spectrogram Extraction</text>
+  <text x="195" y="522" text-anchor="middle" font-size="12" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">Linear STFT</text>
+  <text x="195" y="538" text-anchor="middle" font-size="12" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">FFT 1024, hop 256</text>
+  <text x="195" y="558" text-anchor="middle" font-size="11" fill="#5b6b7c">80-band mel (train-time,</text>
+  <text x="195" y="572" text-anchor="middle" font-size="11" fill="#5b6b7c">reconstruction target only)</text>
+
+  <!-- E2: F0 -->
+  <rect x="340" y="478" width="250" height="110" rx="6" fill="#eafaf6" stroke="#0f7a72" stroke-width="1.5"/>
+  <text x="465" y="500" text-anchor="middle" font-size="14" font-weight="700" fill="#0b4a44">F0 Extraction</text>
+  <text x="465" y="522" text-anchor="middle" font-size="12" fill="#0f6b62" font-family="Consolas, 'Cascadia Code', monospace">WORLD DIO + StoneMask</text>
+  <text x="465" y="538" text-anchor="middle" font-size="12" fill="#0f6b62" font-family="Consolas, 'Cascadia Code', monospace">matched to spec. frame count</text>
+  <text x="465" y="558" text-anchor="middle" font-size="11" fill="#3f7a72">unvoiced -&gt; 0 -&gt;</text>
+  <text x="465" y="572" text-anchor="middle" font-size="11" fill="#3f7a72">log-domain interpolation</text>
+
+  <line x1="590" y1="533" x2="628" y2="533" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <rect x="630" y="478" width="240" height="110" rx="6" fill="#fff9e6" stroke="#b8860b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="750" y="500" text-anchor="middle" font-size="12.5" font-weight="700" fill="#6b5210">Corpus-level F0</text>
+  <text x="750" y="522" text-anchor="middle" font-size="11" fill="#6b5210">mean 206.7 Hz</text>
+  <text x="750" y="538" text-anchor="middle" font-size="11" fill="#6b5210">range 144-393 Hz</text>
+  <text x="750" y="558" text-anchor="middle" font-size="10.5" fill="#6b5210">consistent with a</text>
+  <text x="750" y="572" text-anchor="middle" font-size="10.5" fill="#6b5210">single narrator</text>
+
+  <!-- merge -->
+  <line x1="195" y1="588" x2="330" y2="606" stroke="#2c5aa0" stroke-width="2"/>
+  <line x1="465" y1="588" x2="330" y2="606" stroke="#0f7a72" stroke-width="2"/>
+  <line x1="330" y1="606" x2="330" y2="638" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- F: Cache verification / length constraint -->
+  <rect x="70" y="640" width="520" height="96" rx="6" fill="#eef3fb" stroke="#2c5aa0" stroke-width="1.5"/>
+  <text x="330" y="662" text-anchor="middle" font-size="15" font-weight="700" fill="#14304f">Cache Verification &amp; Length Constraint</text>
+  <text x="330" y="684" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">torch.load() validation; corrupted tensors discarded</text>
+  <text x="330" y="702" text-anchor="middle" font-size="12.5" fill="#3a5674" font-family="Consolas, 'Cascadia Code', monospace">max_phoneme_ids = 400 (actual: 25-399, mean 214.4)</text>
+
+  <line x1="590" y1="688" x2="628" y2="688" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3,3"/>
+  <rect x="630" y="646" width="240" height="60" rx="6" fill="#fff9e6" stroke="#b8860b" stroke-width="1.2" stroke-dasharray="4,3"/>
+  <text x="750" y="670" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6b5210">No utterances removed</text>
+  <text x="750" y="688" text-anchor="middle" font-size="11" fill="#6b5210">at this stage</text>
+
+  <line x1="330" y1="736" x2="330" y2="760" stroke="#2c5aa0" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- G: Final dataset -->
+  <rect x="70" y="762" width="520" height="80" rx="6" fill="#eafaf6" stroke="#0f7a72" stroke-width="2.5"/>
+  <text x="330" y="787" text-anchor="middle" font-size="15" font-weight="700" fill="#0b4a44">Final Dataset</text>
+  <text x="330" y="808" text-anchor="middle" font-size="12.5" fill="#0f6b62" font-family="Consolas, 'Cascadia Code', monospace">13,100 / 13,100 utterances retained (100%)</text>
+  <text x="330" y="826" text-anchor="middle" font-size="12.5" fill="#0f6b62" font-family="Consolas, 'Cascadia Code', monospace">Train 12,500 / Val 100 / Test 500 (Sec. 3.1)</text>
+</svg>
