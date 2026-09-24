@@ -66,11 +66,11 @@
   <text x="750" y="166" text-anchor="middle" font-size="9.5" fill="#5b6b7c">best val_loss_mel</text>
   <line x1="750" y1="168" x2="750" y2="200" stroke="#2c5aa0" stroke-width="1" stroke-dasharray="3,3"/>
 
-  <!-- Banhmi-TTS checkpoint marker -->
+  <!-- Full model checkpoint marker -->
   <line x1="853" y1="200" x2="853" y2="250" stroke="#0f7a72" stroke-width="1.5"/>
   <circle cx="853" cy="225" r="4.5" fill="#0f7a72"/>
   <rect x="768" y="270" width="170" height="50" rx="5" fill="#eafaf6" stroke="#0f7a72" stroke-width="1.5"/>
-  <text x="853" y="289" text-anchor="middle" font-size="12" font-weight="700" fill="#0b4a44">Banhmi-TTS (full)</text>
+  <text x="853" y="289" text-anchor="middle" font-size="12" font-weight="700" fill="#0b4a44">Full model</text>
   <text x="853" y="305" text-anchor="middle" font-size="10.5" fill="#0f6b62" font-family="Consolas, monospace">epoch 1079</text>
   <text x="853" y="318" text-anchor="middle" font-size="9.5" fill="#3f7a72">best val_loss_mel</text>
   <line x1="853" y1="250" x2="853" y2="270" stroke="#0f7a72" stroke-width="1" stroke-dasharray="3,3"/>
