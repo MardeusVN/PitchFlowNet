@@ -4,13 +4,13 @@ source /home/dev/miniconda3/bin/activate edgetts
 
 echo "--- syncing code ---"
 rsync -a --exclude='.git' --exclude='data' --exclude='notebooks' \
-    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/EdgeTTS/ /home/dev/EdgeTTS/
+    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/PitchFlowNet/ /home/dev/PitchFlowNet/
 
 echo "--- installing tensorboard ---"
 pip install -q "tensorboard>=2.13,<3"
 
 echo "--- launching training ---"
-cd /home/dev/EdgeTTS/src/python
+cd /home/dev/PitchFlowNet/src/python
 python -m piper_train \
     --dataset-dir /home/dev/data_preprocessed \
     --batch-size 8 \

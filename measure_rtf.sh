@@ -11,9 +11,9 @@ echo "Checkpoint : $CKPT"
 echo "Sentences  : $SENTENCES"
 
 rsync -a --exclude='.git' --exclude='data' --exclude='notebooks' \
-    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/EdgeTTS/ /home/dev/EdgeTTS/
+    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/PitchFlowNet/ /home/dev/PitchFlowNet/
 
-cd /home/dev/EdgeTTS/src/python
+cd /home/dev/PitchFlowNet/src/python
 
 python -m piper_train.measure_rtf \
     --checkpoint "$CKPT" \

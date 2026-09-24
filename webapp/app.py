@@ -4,7 +4,7 @@
 Run from WSL (edgetts conda env), from any directory:
 
     conda activate edgetts
-    streamlit run /home/dev/EdgeTTS/webapp/app.py
+    streamlit run /home/dev/PitchFlowNet/webapp/app.py
 """
 import io
 import os

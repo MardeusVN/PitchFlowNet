@@ -11,9 +11,9 @@ source /home/dev/miniconda3/bin/activate edgetts
 
 echo "--- syncing code ---"
 rsync -a --exclude='.git' --exclude='data' --exclude='notebooks' \
-    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/EdgeTTS/ /home/dev/EdgeTTS/
+    /mnt/c/Users/duyng/OneDrive/Documents/Repository/FPT-Graduation-Project/PitchFlowNet/ /home/dev/PitchFlowNet/
 
-cd /home/dev/EdgeTTS/src/python
+cd /home/dev/PitchFlowNet/src/python
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # ── Config B: BigVGAN only ────────────────────────────────────────────────────
